@@ -232,3 +232,34 @@ export function generateAttributesFromOverall(archetypeKey: string, targetOveral
 
   return result;
 }
+// Tipi e funzioni per la classifica (richiesti da standings.tsx)
+export interface PlayerInput {
+  id: string;
+  name: string;
+  avatar_url?: string | null;
+  overall: number;
+  matches_played?: number;
+  wins?: number;
+  draws?: number;
+  losses?: number;
+  goals?: number;
+  assists?: number;
+  mvp_count?: number;
+  points?: number;
+  form_trend?: number[];
+  [key: string]: any;
+}
+
+export function calculateOfficialStandings(players: PlayerInput[] = []): PlayerInput[] {
+  return [...players].sort((a, b) => {
+    const ptsA = (a.wins || 0) * 3 + (a.draws || 0);
+    const ptsB = (b.wins || 0) * 3 + (b.draws || 0);
+    if (ptsB !== ptsA) return ptsB - ptsA;
+    if ((b.goals || 0) !== (a.goals || 0)) return (b.goals || 0) - (a.goals || 0);
+    return (b.overall || 0) - (a.overall || 0);
+  });
+}
+
+export function calculateGeneralStandings(players: PlayerInput[] = []): PlayerInput[] {
+  return calculateOfficialStandings(players);
+}
