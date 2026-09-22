@@ -1,8 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { createRoute } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Route as rootRoute } from './__root';
 import { queryKeys, supabase } from '../lib/actions';
+import { 
+  ARCHETYPES, 
+  MainRole, 
+  calculateArchetypeOverall, 
+  generateAttributesFromOverall 
+} from '../lib/engine';
 
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
@@ -13,14 +19,12 @@ export const Route = createRoute({
 function AdminPage() {
   const queryClient = useQueryClient();
 
-  // Recupera la lega salvata o la prima lega reale dell'utente
   const [leagueId, setLeagueId] = useState<string>(
     typeof window !== 'undefined' 
       ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id') || ''
       : ''
   );
 
-  // Se non c'è nel localStorage, recupera l'ID reale della prima lega disponibile su Supabase
   useQuery({
     queryKey: ['admin_active_league'],
     queryFn: async () => {
@@ -38,26 +42,27 @@ function AdminPage() {
 
   const activeLeagueId = leagueId;
 
-  // State Sondaggi & Modifiche Carte
-  const [targetDate, setTargetDate] = useState('');
-  const [selectedPlayerId, setSelectedPlayerId] = useState('');
-  const [cardModifier, setCardModifier] = useState<number>(1);
-
-  // State Aggiunta Giocatore Fittizio
+  // --- STATI FORM FITTIZIO (Senza numero di maglia) ---
   const [dummyName, setDummyName] = useState('');
-  const [dummyNumber, setDummyNumber] = useState(10);
-  const [dummyPosition, setDummyPosition] = useState('Attaccante');
-  const [dummyFoot, setDummyFoot] = useState('Destro');
-  const [dummyArchetype, setDummyArchetype] = useState('Bomber d Area');
+  const [dummyRole, setDummyRole] = useState<MainRole>('ATT');
+  const [dummyArchetype, setDummyArchetype] = useState('ATT_BOMBER');
+  const [dummyTargetOvr, setDummyTargetOvr] = useState(70);
 
-  // State Simulatore Partite
+  // --- STATI MODIFICA GIOCATORE (MODALE) ---
+  const [editingPlayer, setEditingPlayer] = useState<any | null>(null);
+  const [editOvrInput, setEditOvrInput] = useState<number>(70);
+  const [editArchetype, setEditArchetype] = useState<string>('ATT_BOMBER');
+  const [editAttributes, setEditAttributes] = useState<Record<string, number>>({});
+  const [editTeamwork, setEditTeamwork] = useState<string>('Medio');
+  const [editGkEfficiency, setEditGkEfficiency] = useState<string>('Media');
+
+  // --- STATI EXTRA ---
+  const [targetDate, setTargetDate] = useState('');
   const [batchCount, setBatchCount] = useState(5);
-
-  // State Modale Reset
   const [showResetModal, setShowResetModal] = useState(false);
   const [resetConfirmInput, setResetConfirmInput] = useState('');
 
-  // 1. Query Membri / Giocatori della tabella players
+  // 1. Query Rosa Giocatori
   const { data: players, refetch: refetchPlayers } = useQuery({
     queryKey: ['players', activeLeagueId],
     queryFn: async () => {
@@ -71,7 +76,128 @@ function AdminPage() {
     },
   });
 
-  // 2. Creazione Sondaggio
+  // 2. Apertura Modale Modifica Giocatore
+  const openEditModal = (player: any) => {
+    const archKey = player.archetype || 'ATT_BOMBER';
+    const attrs = player.attributes || generateAttributesFromOverall(archKey, player.overall || 70);
+    const calculatedOvr = calculateArchetypeOverall(archKey, attrs);
+
+    setEditingPlayer(player);
+    setEditArchetype(archKey);
+    setEditAttributes(attrs);
+    setEditOvrInput(calculatedOvr);
+    setEditTeamwork(player.teamwork || 'Medio');
+    setEditGkEfficiency(player.gk_efficiency || 'Media');
+  };
+
+  // Cambio Overall Target nel modale -> rigenera le 6 stats secondo i pesi dell'archetipo
+  const handleEditOvrChange = (newTarget: number) => {
+    const target = Math.max(40, Math.min(99, newTarget));
+    setEditOvrInput(target);
+    const newAttrs = generateAttributesFromOverall(editArchetype, target);
+    setEditAttributes(newAttrs);
+  };
+
+  // Cambio singola statistica nel modale -> ricalcola in tempo reale l'Overall
+  const handleSingleStatChange = (statKey: string, val: number) => {
+    const clampedVal = Math.max(40, Math.min(99, val));
+    const updated = { ...editAttributes, [statKey]: clampedVal };
+    setEditAttributes(updated);
+    const newOvr = calculateArchetypeOverall(editArchetype, updated);
+    setEditOvrInput(newOvr);
+  };
+
+  // Cambio Archetipo nel modale -> rigenera le stats adattandole al nuovo ruolo/archetipo
+  const handleEditArchetypeChange = (newArchKey: string) => {
+    setEditArchetype(newArchKey);
+    const newAttrs = generateAttributesFromOverall(newArchKey, editOvrInput);
+    setEditAttributes(newAttrs);
+  };
+
+  // 3. Salvataggio Modifiche Giocatore (Mutazione)
+  const updatePlayerMutation = useMutation({
+    mutationFn: async () => {
+      if (!editingPlayer) return;
+      const finalRole = ARCHETYPES[editArchetype]?.role || 'ATT';
+      const finalOvr = calculateArchetypeOverall(editArchetype, editAttributes);
+
+      const { error } = await supabase
+        .from('players')
+        .update({
+          role: finalRole,
+          archetype: editArchetype,
+          overall: finalOvr,
+          attributes: editAttributes,
+          teamwork: editTeamwork,
+          gk_efficiency: editGkEfficiency,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', editingPlayer.id);
+
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      alert('Dati giocatore aggiornati con successo!');
+      setEditingPlayer(null);
+      refetchPlayers();
+      queryClient.invalidateQueries({ queryKey: ['players'] });
+    },
+    onError: (err: any) => alert(`Errore aggiornamento: ${err.message}`),
+  });
+
+  // 4. Creazione Giocatore Fittizio
+  const addDummyMutation = useMutation({
+    mutationFn: async () => {
+      if (!dummyName.trim()) throw new Error('Inserisci un nome');
+
+      let targetLeagueId = activeLeagueId;
+      if (!targetLeagueId || targetLeagueId === '00000000-0000-0000-0000-000000000001') {
+        const { data: firstLeague } = await supabase.from('leagues').select('id').limit(1).maybeSingle();
+        if (firstLeague?.id) targetLeagueId = firstLeague.id;
+      }
+
+      const generatedAttrs = generateAttributesFromOverall(dummyArchetype, dummyTargetOvr);
+      const computedOvr = calculateArchetypeOverall(dummyArchetype, generatedAttrs);
+
+      const { error } = await supabase.from('players').insert({
+        league_id: targetLeagueId || null,
+        name: dummyName.trim(),
+        role: dummyRole,
+        archetype: dummyArchetype,
+        overall: computedOvr,
+        attributes: generatedAttrs,
+        teamwork: 'Medio',
+        gk_efficiency: 'Media',
+        is_dummy: true,
+        user_id: null,
+      });
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      alert(`Giocatore "${dummyName}" creato con successo!`);
+      setDummyName('');
+      setDummyTargetOvr(70);
+      refetchPlayers();
+      queryClient.invalidateQueries({ queryKey: ['players'] });
+    },
+    onError: (err: any) => alert(`Errore: ${err.message}`),
+  });
+
+  // 5. Rimuovi Giocatore
+  const deletePlayerMutation = useMutation({
+    mutationFn: async (playerId: string) => {
+      const { error } = await supabase.from('players').delete().eq('id', playerId);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      alert('Giocatore rimosso dalla lega!');
+      refetchPlayers();
+      queryClient.invalidateQueries({ queryKey: ['players'] });
+    },
+    onError: (err: any) => alert(`Errore eliminazione: ${err.message}`),
+  });
+
+  // 6. Sondaggio Partita
   const createPollMutation = useMutation({
     mutationFn: async () => {
       const { error } = await supabase
@@ -90,83 +216,7 @@ function AdminPage() {
     },
   });
 
-  // 3. Modificatore Carta (aggiornato per supportare i giocatori da players)
-  const cardModifierMutation = useMutation({
-    mutationFn: async () => {
-      if (!selectedPlayerId) throw new Error('Seleziona un giocatore');
-      
-      // Prova l'RPC se configurato
-      const { error: rpcError } = await supabase.rpc('rpc_apply_card_modifier', {
-        p_member_id: selectedPlayerId,
-        p_delta: cardModifier,
-      });
-
-      // Se il giocatore è solo nella tabella players, applichiamo un update di fallback
-      if (rpcError) {
-        const { error: updateError } = await supabase
-          .from('players')
-          .update({ updated_at: new Date().toISOString() })
-          .eq('id', selectedPlayerId);
-        if (updateError && !rpcError) throw new Error(updateError.message);
-      }
-    },
-    onSuccess: () => {
-      alert('Statistiche aggiornate con successo!');
-      refetchPlayers();
-      queryClient.invalidateQueries({ queryKey: ['players'] });
-    },
-    onError: (err: any) => alert(`Errore modifica carta: ${err.message}`),
-  });
-
-  // 4. Inserimento Giocatore Fittizio
-  const addDummyMutation = useMutation({
-    mutationFn: async () => {
-      if (!dummyName.trim()) throw new Error('Inserisci un nome');
-
-      let targetLeagueId = activeLeagueId;
-      if (!targetLeagueId || targetLeagueId === '00000000-0000-0000-0000-000000000001') {
-        const { data: firstLeague } = await supabase.from('leagues').select('id').limit(1).maybeSingle();
-        if (firstLeague?.id) {
-          targetLeagueId = firstLeague.id;
-        }
-      }
-
-      const { error } = await supabase.from('players').insert({
-        league_id: targetLeagueId || null,
-        name: dummyName.trim(),
-        number: Number(dummyNumber),
-        position: dummyPosition,
-        preferred_foot: dummyFoot,
-        archetype: dummyArchetype,
-        is_dummy: true,
-        user_id: null,
-      });
-      if (error) throw new Error(error.message);
-    },
-    onSuccess: () => {
-      alert(`Giocatore "${dummyName}" aggiunto con successo!`);
-      setDummyName('');
-      refetchPlayers();
-      queryClient.invalidateQueries({ queryKey: ['players'] });
-    },
-    onError: (err: any) => alert(`Errore: ${err.message}`),
-  });
-
-  // 5. Rimuovi / Espelli Giocatore
-  const deletePlayerMutation = useMutation({
-    mutationFn: async (playerId: string) => {
-      const { error } = await supabase.from('players').delete().eq('id', playerId);
-      if (error) throw new Error(error.message);
-    },
-    onSuccess: () => {
-      alert('Giocatore rimosso dalla lega!');
-      refetchPlayers();
-      queryClient.invalidateQueries({ queryKey: ['players'] });
-    },
-    onError: (err: any) => alert(`Errore eliminazione: ${err.message}`),
-  });
-
-  // 6. Simulatore Partite
+  // 7. Simulazione Partite
   const simulateMatchesMutation = useMutation({
     mutationFn: async (count: number) => {
       const matches = [];
@@ -183,14 +233,13 @@ function AdminPage() {
       if (error) throw new Error(error.message);
     },
     onSuccess: (_, count) => {
-      alert(`${count} ${count === 1 ? 'partita simulata' : 'partite simulate'} con successo!`);
+      alert(`${count} partite simulate!`);
       queryClient.invalidateQueries({ queryKey: ['matches'] });
       queryClient.invalidateQueries({ queryKey: ['standings'] });
     },
-    onError: (err: any) => alert(`Errore simulazione: ${err.message}`),
   });
 
-  // 7. Reset Totale Risultati
+  // 8. Reset Lega
   const resetLeagueMutation = useMutation({
     mutationFn: async () => {
       const { error } = await supabase.rpc('reset_league_data', {
@@ -199,179 +248,324 @@ function AdminPage() {
       if (error) throw new Error(error.message);
     },
     onSuccess: () => {
-      alert('Tutti i risultati, match e statistiche sono stati azzerati con successo!');
+      alert('Tutti i dati azzerati con successo!');
       setShowResetModal(false);
       setResetConfirmInput('');
       queryClient.invalidateQueries();
     },
-    onError: (err: any) => alert(`Errore nel reset: ${err.message}`),
   });
 
+  const dummyAvailableArchetypes = useMemo(() => {
+    return Object.values(ARCHETYPES).filter((a) => a.role === dummyRole);
+  }, [dummyRole]);
+
   return (
-    <div className="p-4 space-y-6 pb-20">
+    <div className="p-4 space-y-6 pb-24 max-w-lg mx-auto">
       {/* Header */}
       <div className="border-b border-[#222c42] pb-3">
         <h1 className="font-bebas text-3xl text-slate-100">PANNELLO ADMIN</h1>
         <p className="text-xs text-slate-400">
-          Gestione rosa, giocatori fittizi, simulazioni e reset di lega
+          Gestione rosa, archetipi, valori ponderati e simulazioni
         </p>
       </div>
 
-      {/* SEZIONE 1: CREA GIOCATORE FITTIZIO */}
+      {/* SEZIONE 1: CREA GIOCATORE FITTIZIO (SENZA MAGLIA) */}
       <div className="bg-[#151b28] p-4 rounded-xl border border-[#222c42] space-y-3">
-        <h2 className="font-bebas text-xl text-amber-400">+ AGGIUNGI GIOCATORE FITTIZIO</h2>
-        <p className="text-xs text-slate-400">
-          Crea i compagni che non usano l'app: potranno riscattare il profilo appena si registrano.
-        </p>
-        <div className="grid grid-cols-2 gap-2 text-xs">
+        <h2 className="font-bebas text-xl text-amber-400">+ AGGIUNGI GIOCATORE</h2>
+        <div className="space-y-3 text-xs">
           <input
             type="text"
             placeholder="Nome / Soprannome"
             value={dummyName}
             onChange={(e) => setDummyName(e.target.value)}
-            className="col-span-2 bg-[#0b0e14] border border-[#222c42] rounded-lg p-2 text-slate-100"
+            className="w-full bg-[#0b0e14] border border-[#222c42] rounded-lg p-2.5 text-slate-100 font-semibold"
           />
-          <input
-            type="number"
-            placeholder="N° Maglia"
-            value={dummyNumber}
-            onChange={(e) => setDummyNumber(Number(e.target.value))}
-            className="bg-[#0b0e14] border border-[#222c42] rounded-lg p-2 text-slate-100"
-          />
-          <select
-            value={dummyPosition}
-            onChange={(e) => setDummyPosition(e.target.value)}
-            className="bg-[#0b0e14] border border-[#222c42] rounded-lg p-2 text-slate-100"
-          >
-            <option value="Portiere">Portiere</option>
-            <option value="Difensore">Difensore</option>
-            <option value="Centrocampista">Centrocampista</option>
-            <option value="Attaccante">Attaccante</option>
-          </select>
-          <select
-            value={dummyFoot}
-            onChange={(e) => setDummyFoot(e.target.value)}
-            className="bg-[#0b0e14] border border-[#222c42] rounded-lg p-2 text-slate-100"
-          >
-            <option value="Destro">Destro</option>
-            <option value="Sinistro">Sinistro</option>
-            <option value="Ambidestro">Ambidestro</option>
-          </select>
-          <input
-            type="text"
-            placeholder="Archetipo (es. Bomber d Area)"
-            value={dummyArchetype}
-            onChange={(e) => setDummyArchetype(e.target.value)}
-            className="bg-[#0b0e14] border border-[#222c42] rounded-lg p-2 text-slate-100"
-          />
+
+          <div>
+            <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Ruolo</label>
+            <div className="grid grid-cols-5 gap-1">
+              {(['POR', 'DIF', 'EST', 'UNI', 'ATT'] as MainRole[]).map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => {
+                    setDummyRole(r);
+                    const first = Object.values(ARCHETYPES).find((a) => a.role === r);
+                    if (first) setDummyArchetype(first.id);
+                  }}
+                  className={`py-1.5 rounded-lg font-bebas text-sm border transition ${
+                    dummyRole === r
+                      ? 'bg-amber-400 text-slate-950 border-amber-400 font-bold'
+                      : 'bg-[#0b0e14] text-slate-300 border-[#222c42]'
+                  }`}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Archetipo</label>
+            <select
+              value={dummyArchetype}
+              onChange={(e) => setDummyArchetype(e.target.value)}
+              className="w-full bg-[#0b0e14] border border-[#222c42] rounded-lg p-2 text-slate-100"
+            >
+              {dummyAvailableArchetypes.map((arch) => (
+                <option key={arch.id} value={arch.id}>
+                  {arch.name} ({arch.weightsSummary})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-[11px] font-bold text-slate-400 uppercase">Overall Iniziale</label>
+              <span className="font-bebas text-lg text-amber-400">{dummyTargetOvr}</span>
+            </div>
+            <input
+              type="range"
+              min="45"
+              max="95"
+              value={dummyTargetOvr}
+              onChange={(e) => setDummyTargetOvr(Number(e.target.value))}
+              className="w-full accent-amber-400 cursor-pointer"
+            />
+          </div>
         </div>
+
         <button
-          disabled={!dummyName || addDummyMutation.isPending}
+          disabled={!dummyName.trim() || addDummyMutation.isPending}
           onClick={() => addDummyMutation.mutate()}
-          className="w-full py-2.5 bg-amber-400 text-black font-bebas text-lg rounded-xl disabled:opacity-50"
+          className="w-full py-2.5 bg-amber-400 text-slate-950 font-bebas text-lg rounded-xl disabled:opacity-40 font-bold transition shadow-md"
         >
-          {addDummyMutation.isPending ? 'Salvataggio...' : 'CREA PROFILO FITTIZIO'}
+          {addDummyMutation.isPending ? 'Salvataggio...' : 'CREA PROFILO'}
         </button>
       </div>
 
-      {/* SEZIONE 2: GESTIONE ROSA & ESPULSIONI */}
+      {/* SEZIONE 2: ROSA & MODIFICA STATISTICHE */}
       <div className="bg-[#151b28] p-4 rounded-xl border border-[#222c42] space-y-3">
         <div className="flex justify-between items-center">
-          <h2 className="font-bebas text-xl text-cyan-400">ROSA GIOCATORI ({players?.length || 0})</h2>
+          <h2 className="font-bebas text-xl text-cyan-400">ROSA & VALORI ({players?.length || 0})</h2>
           <button onClick={() => refetchPlayers()} className="text-xs text-slate-400 underline">Aggiorna</button>
         </div>
-        <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+
+        <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
           {players && players.length > 0 ? (
-            players.map((p: any) => (
-              <div
-                key={p.id}
-                className="flex justify-between items-center bg-[#0b0e14] border border-[#222c42] p-2.5 rounded-lg text-xs"
-              >
-                <div>
-                  <span className="font-bold text-slate-200 mr-1.5">#{p.number} {p.name}</span>
-                  <span className="text-slate-500">({p.position})</span>
-                  <span
-                    className={`ml-2 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold ${
-                      p.is_dummy ? 'bg-amber-900/60 text-amber-300' : 'bg-emerald-900/60 text-emerald-300'
-                    }`}
-                  >
-                    {p.is_dummy ? 'Fittizio' : 'Reale'}
-                  </span>
-                </div>
-                <button
-                  disabled={deletePlayerMutation.isPending}
-                  onClick={() => {
-                    if (confirm(`Confermi di voler rimuovere ${p.name} dalla lega?`)) {
-                      deletePlayerMutation.mutate(p.id);
-                    }
-                  }}
-                  className="px-2 py-1 bg-rose-950 border border-rose-800 text-rose-300 rounded font-semibold hover:bg-rose-900"
+            players.map((p: any) => {
+              const currentOvr = p.overall || 70;
+              const archDef = ARCHETYPES[p.archetype];
+              return (
+                <div
+                  key={p.id}
+                  className="flex justify-between items-center bg-[#0b0e14] border border-[#222c42] p-2.5 rounded-xl text-xs gap-2"
                 >
-                  Rimuovi
-                </button>
-              </div>
-            ))
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-bold text-slate-100 text-sm truncate">{p.name}</span>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-400/20 text-amber-300 border border-amber-400/40">
+                        {currentOvr} OVR
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
+                      <span>{archDef ? archDef.name : p.archetype || 'Base'}</span>
+                      <span>•</span>
+                      <span>{p.role || 'ATT'}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => openEditModal(p)}
+                      className="px-2.5 py-1.5 bg-amber-400 text-slate-950 font-bold text-xs rounded-lg hover:bg-amber-300 transition"
+                    >
+                      Modifica
+                    </button>
+                    <button
+                      disabled={deletePlayerMutation.isPending}
+                      onClick={() => {
+                        if (confirm(`Rimuovere definitivamente ${p.name}?`)) {
+                          deletePlayerMutation.mutate(p.id);
+                        }
+                      }}
+                      className="px-2 py-1.5 bg-rose-950/70 border border-rose-800 text-rose-300 rounded-lg hover:bg-rose-900"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              );
+            })
           ) : (
-            <p className="text-xs text-slate-500 italic">Nessun giocatore registrato in questa lega.</p>
+            <p className="text-xs text-slate-500 italic">Nessun giocatore registrato.</p>
           )}
         </div>
       </div>
 
-      {/* SEZIONE 3: CARD UPDATE (AGGIORNATA PER LEGGERE DA PLAYERS) */}
-      <div className="bg-[#151b28] p-4 rounded-xl border border-[#222c42] space-y-3">
-        <h2 className="font-bebas text-xl text-amber-400">CARD UPDATE (AGGIORNA STATS)</h2>
-        <div>
-          <label className="block text-xs uppercase text-slate-400 font-semibold mb-1">Giocatore</label>
-          <select
-            value={selectedPlayerId}
-            onChange={(e) => setSelectedPlayerId(e.target.value)}
-            className="w-full bg-[#0b0e14] border border-[#222c42] rounded-lg p-2.5 text-xs text-slate-100"
-          >
-            <option value="">-- Seleziona Giocatore --</option>
-            {players?.map((p: any) => (
-              <option key={p.id} value={p.id}>
-                #{p.number} {p.name} {p.is_dummy ? '(Fittizio)' : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs uppercase text-slate-400 font-semibold mb-1">Delta Attributi</label>
-          <div className="flex gap-2">
-            {[-2, -1, 1, 2].map((val) => (
+      {/* MODALE ADMIN: MODIFICA COMPLETA STATS GIOCATORE */}
+      {editingPlayer && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 z-50 overflow-y-auto">
+          <div className="bg-[#151b28] border border-[#222c42] rounded-2xl max-w-md w-full p-5 space-y-4 my-auto shadow-2xl">
+            {/* Header Modale */}
+            <div className="flex justify-between items-start border-b border-[#222c42] pb-3">
+              <div>
+                <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
+                  MODIFICA VALORI & ARCHETIPO
+                </span>
+                <h3 className="font-bebas text-2xl text-slate-100">{editingPlayer.name}</h3>
+              </div>
               <button
-                key={val}
-                type="button"
-                onClick={() => setCardModifier(val)}
-                className={`flex-1 py-1.5 rounded-lg font-bebas text-lg border ${
-                  cardModifier === val ? 'bg-amber-400 text-black border-amber-400' : 'bg-[#0b0e14] text-slate-300 border-[#222c42]'
-                }`}
+                onClick={() => setEditingPlayer(null)}
+                className="w-7 h-7 rounded-full bg-[#0b0e14] text-slate-400 flex items-center justify-center hover:text-white"
               >
-                {val > 0 ? `+${val}` : val}
+                ✕
               </button>
-            ))}
+            </div>
+
+            {/* Scelta Archetipo */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">
+                Archetipo Calcolo Ponderato
+              </label>
+              <select
+                value={editArchetype}
+                onChange={(e) => handleEditArchetypeChange(e.target.value)}
+                className="w-full bg-[#0b0e14] border border-[#222c42] rounded-lg p-2 text-xs text-slate-100"
+              >
+                {Object.values(ARCHETYPES).map((arch) => (
+                  <option key={arch.id} value={arch.id}>
+                    [{arch.role}] {arch.name} — {arch.weightsSummary}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* OVERALL TARGET RAPIDO */}
+            <div className="bg-[#0b0e14] p-3 rounded-xl border border-[#222c42] space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-bold text-slate-300">OVERALL CALCOLATO</span>
+                <span className="font-bebas text-3xl text-amber-400">{editOvrInput}</span>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-tight">
+                Scorri per rigenerare in automatico tutte le 6 statistiche seguendo le percentuali del ruolo.
+              </p>
+              <input
+                type="range"
+                min="45"
+                max="96"
+                value={editOvrInput}
+                onChange={(e) => handleEditOvrChange(Number(e.target.value))}
+                className="w-full accent-amber-400 cursor-pointer"
+              />
+            </div>
+
+            {/* STATS SINGOLE PONDERATE */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-400 uppercase mb-2">
+                Rifinitura Singole Statistiche
+              </label>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                {Object.entries(ARCHETYPES[editArchetype]?.weights || {}).map(([stat, weight]) => {
+                  const val = editAttributes[stat] ?? 70;
+                  return (
+                    <div key={stat} className="bg-[#0b0e14] p-2 rounded-lg border border-[#222c42]">
+                      <div className="flex justify-between text-[11px] font-bold uppercase mb-1">
+                        <span className="text-slate-300">{stat} ({Math.round(weight * 100)}%)</span>
+                        <span className="text-amber-400 font-mono">{val}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="40"
+                        max="99"
+                        value={val}
+                        onChange={(e) => handleSingleStatChange(stat, Number(e.target.value))}
+                        className="w-full accent-amber-400 cursor-pointer h-1.5"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* GIOCO DI SQUADRA & EFFICACIA PORTIERE */}
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">
+                  Gioco di Squadra
+                </label>
+                <div className="flex gap-1">
+                  {['Basso', 'Medio', 'Alto'].map((lvl) => (
+                    <button
+                      key={lvl}
+                      type="button"
+                      onClick={() => setEditTeamwork(lvl)}
+                      className={`flex-1 py-1 rounded text-[11px] font-bold border transition ${
+                        editTeamwork === lvl
+                          ? 'bg-amber-400 text-slate-950 border-amber-400'
+                          : 'bg-[#0b0e14] text-slate-400 border-[#222c42]'
+                      }`}
+                    >
+                      {lvl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">
+                  Efficacia Portiere
+                </label>
+                <div className="flex gap-1">
+                  {['Bassa', 'Media', 'Alta'].map((lvl) => (
+                    <button
+                      key={lvl}
+                      type="button"
+                      onClick={() => setEditGkEfficiency(lvl)}
+                      className={`flex-1 py-1 rounded text-[11px] font-bold border transition ${
+                        editGkEfficiency === lvl
+                          ? 'bg-amber-400 text-slate-950 border-amber-400'
+                          : 'bg-[#0b0e14] text-slate-400 border-[#222c42]'
+                      }`}
+                    >
+                      {lvl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Bottoni Azione */}
+            <div className="flex gap-2 pt-2 border-t border-[#222c42]">
+              <button
+                type="button"
+                onClick={() => setEditingPlayer(null)}
+                className="flex-1 py-2.5 bg-[#0b0e14] hover:bg-slate-800 text-slate-300 font-semibold text-xs rounded-xl"
+              >
+                Annulla
+              </button>
+              <button
+                type="button"
+                disabled={updatePlayerMutation.isPending}
+                onClick={() => updatePlayerMutation.mutate()}
+                className="flex-1 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bebas text-lg rounded-xl font-bold transition shadow-md"
+              >
+                {updatePlayerMutation.isPending ? 'Salvataggio...' : 'SALVA STATS'}
+              </button>
+            </div>
           </div>
         </div>
-        <button
-          disabled={!selectedPlayerId || cardModifierMutation.isPending}
-          onClick={() => cardModifierMutation.mutate()}
-          className="w-full py-2.5 bg-amber-400 text-black font-bebas text-lg rounded-xl disabled:opacity-50"
-        >
-          APPLICA MODIFICATORE CARTA
-        </button>
-      </div>
+      )}
 
-      {/* SEZIONE 4: SIMULATORE PARTITE */}
+      {/* SEZIONE 3: SIMULATORE & SONDAGGI */}
       <div className="bg-[#151b28] p-4 rounded-xl border border-[#222c42] space-y-3">
         <h2 className="font-bebas text-xl text-sky-400">SIMULATORE PARTITE</h2>
-        <p className="text-xs text-slate-400">
-          Genera partite casuali per testare la classifica e le statistiche dei giocatori.
-        </p>
         <div className="flex gap-2">
           <button
             disabled={simulateMatchesMutation.isPending}
             onClick={() => simulateMatchesMutation.mutate(1)}
-            className="flex-1 py-2 bg-sky-500 text-black font-bebas text-lg rounded-xl disabled:opacity-50"
+            className="flex-1 py-2 bg-sky-500 text-black font-bebas text-lg rounded-xl"
           >
             {simulateMatchesMutation.isPending ? 'Simulo...' : 'SIMULA 1 PARTITA'}
           </button>
@@ -387,7 +581,7 @@ function AdminPage() {
             <button
               disabled={simulateMatchesMutation.isPending}
               onClick={() => simulateMatchesMutation.mutate(batchCount)}
-              className="py-2 px-3 bg-indigo-600 text-white font-bebas text-lg rounded-xl disabled:opacity-50"
+              className="py-2 px-3 bg-indigo-600 text-white font-bebas text-lg rounded-xl"
             >
               SIMULA SERIE
             </button>
@@ -395,18 +589,14 @@ function AdminPage() {
         </div>
       </div>
 
-      {/* SEZIONE 5: NUOVO SONDAGGIO PARTITA */}
       <div className="bg-[#151b28] p-4 rounded-xl border border-[#222c42] space-y-3">
         <h2 className="font-bebas text-xl text-lime-400">NUOVO SONDAGGIO PARTITA</h2>
-        <div>
-          <label className="block text-xs uppercase text-slate-400 font-semibold mb-1">Data Partita</label>
-          <input
-            type="date"
-            value={targetDate}
-            onChange={(e) => setTargetDate(e.target.value)}
-            className="w-full bg-[#0b0e14] border border-[#222c42] rounded-lg p-2.5 text-sm text-slate-100"
-          />
-        </div>
+        <input
+          type="date"
+          value={targetDate}
+          onChange={(e) => setTargetDate(e.target.value)}
+          className="w-full bg-[#0b0e14] border border-[#222c42] rounded-lg p-2.5 text-sm text-slate-100"
+        />
         <button
           disabled={!targetDate || createPollMutation.isPending}
           onClick={() => createPollMutation.mutate()}
@@ -416,12 +606,9 @@ function AdminPage() {
         </button>
       </div>
 
-      {/* SEZIONE 6: ZONA PERICOLO - RESET LEGA */}
+      {/* SEZIONE 4: RESET LEGA */}
       <div className="bg-rose-950/30 border border-rose-800/80 p-4 rounded-xl space-y-2">
         <h2 className="font-bebas text-xl text-rose-400">ZONA PERICOLO: RESET RISULTATI</h2>
-        <p className="text-xs text-rose-300/80">
-          Cancella tutte le partite giocate o simulate della lega e azzera le classifiche. I giocatori registrati non saranno eliminati.
-        </p>
         <button
           onClick={() => setShowResetModal(true)}
           className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bebas text-lg rounded-xl shadow-lg transition"
@@ -430,38 +617,30 @@ function AdminPage() {
         </button>
       </div>
 
-      {/* MODAL CONFERMA RESET */}
       {showResetModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
           <div className="bg-[#151b28] border border-rose-600 rounded-xl p-5 max-w-sm w-full space-y-4 shadow-2xl">
             <h3 className="font-bebas text-2xl text-rose-500">ATTENZIONE: CONFERMA RESET</h3>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Questa azione cancellerà permanentemente tutti i match e azzererà la classifica.
-              Per procedere scrivi <strong className="text-rose-400">RESET</strong> qui sotto:
-            </p>
             <input
               type="text"
               value={resetConfirmInput}
               onChange={(e) => setResetConfirmInput(e.target.value)}
               placeholder="Scrivi RESET per confermare"
-              className="w-full bg-[#0b0e14] border border-rose-500 rounded-lg p-2.5 text-center text-sm text-slate-100 uppercase font-bold tracking-widest"
+              className="w-full bg-[#0b0e14] border border-rose-500 rounded-lg p-2.5 text-center text-sm text-slate-100 uppercase font-bold"
             />
             <div className="flex gap-2">
               <button
-                onClick={() => {
-                  setShowResetModal(false);
-                  setResetConfirmInput('');
-                }}
-                className="flex-1 py-2 bg-[#222c42] text-slate-300 rounded-lg text-xs font-semibold"
+                onClick={() => setShowResetModal(false)}
+                className="flex-1 py-2 bg-[#222c42] text-slate-300 rounded-lg text-xs"
               >
                 Annulla
               </button>
               <button
                 disabled={resetConfirmInput !== 'RESET' || resetLeagueMutation.isPending}
                 onClick={() => resetLeagueMutation.mutate()}
-                className="flex-1 py-2 bg-rose-600 text-white rounded-lg font-bebas text-base disabled:opacity-30 disabled:cursor-not-allowed hover:bg-rose-500"
+                className="flex-1 py-2 bg-rose-600 text-white rounded-lg font-bebas text-base disabled:opacity-30"
               >
-                {resetLeagueMutation.isPending ? 'Azzeramento...' : 'CONFERMA'}
+                CONFERMA
               </button>
             </div>
           </div>
