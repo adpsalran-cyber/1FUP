@@ -1,5 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { supabase } from '../lib/engine';
+import React, { useState } from 'react';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL || '',
+  import.meta.env.VITE_SUPABASE_ANON_KEY || ''
+);
 
 interface LeagueModalProps {
   userId: string;
