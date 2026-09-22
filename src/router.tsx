@@ -7,15 +7,12 @@ import { Route as standingsRoute } from './routes/standings';
 import { Route as playersRoute } from './routes/players';
 import { Route as matchDetailRoute } from './routes/matches.$matchId';
 import { Route as adminRoute } from './routes/admin';
+import { MatchesRoute } from './routes/matches';
 
 const matchesListRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/matches',
-  component: () => (
-    <div className="p-6 text-center font-bebas text-slate-400">
-      Seleziona una partita dalla Home o usa il link diretto della sfida
-    </div>
-  ),
+  component: MatchesRoute,
 });
 
 const profileRoute = createRoute({
