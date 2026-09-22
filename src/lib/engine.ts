@@ -263,3 +263,18 @@ export function calculateOfficialStandings(players: PlayerInput[] = []): PlayerI
 export function calculateGeneralStandings(players: PlayerInput[] = []): PlayerInput[] {
   return calculateOfficialStandings(players);
 }
+export function calculateDynamicOverall(player: any): number {
+  if (!player) return 70;
+  
+  // Se ha un archetipo definito e gli attributi, calcola l'overall ponderato
+  if (player.archetype && player.attributes) {
+    const baseOvr = calculateArchetypeOverall(player.archetype, player.attributes);
+    const formBonus = (player.current_form ?? 0);
+    return Math.max(40, Math.min(99, baseOvr + formBonus));
+  }
+
+  // Fallback sull'overall memorizzato o su 70
+  const baseOvr = player.overall ?? 70;
+  const formBonus = (player.current_form ?? 0);
+  return Math.max(40, Math.min(99, baseOvr + formBonus));
+}
