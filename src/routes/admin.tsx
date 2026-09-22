@@ -56,8 +56,32 @@ function AdminPage() {
   const [editTeamwork, setEditTeamwork] = useState<string>('Medio');
   const [editGkEfficiency, setEditGkEfficiency] = useState<string>('Media');
 
-  // --- STATI EXTRA ---
+  // --- STATI SONDAGGIO (Data + fino a 6 slot orari) ---
   const [targetDate, setTargetDate] = useState('');
+  const [pollTitle, setPollTitle] = useState('Partita di Calcetto');
+  const [timeSlots, setTimeSlots] = useState<string[]>([
+    '19:30', '20:00', '20:30', '21:00', '21:30', '22:00'
+  ]);
+
+  const handleTimeSlotChange = (index: number, value: string) => {
+    const updated = [...timeSlots];
+    updated[index] = value;
+    setTimeSlots(updated);
+  };
+
+  const addTimeSlot = () => {
+    if (timeSlots.length < 6) {
+      setTimeSlots([...timeSlots, '20:00']);
+    }
+  };
+
+  const removeTimeSlot = (index: number) => {
+    if (timeSlots.length > 1) {
+      setTimeSlots(timeSlots.filter((_, i) => i !== index));
+    }
+  };
+
+  // --- STATI EXTRA ---
   const [batchCount, setBatchCount] = useState(5);
   const [showResetModal, setShowResetModal] = useState(false);
   const [resetConfirmInput, setResetConfirmInput] = useState('');
@@ -90,15 +114,14 @@ function AdminPage() {
     setEditGkEfficiency(player.gk_efficiency || 'Media');
   };
 
-  // Cambio Overall Target nel modale -> rigenera le 6 stats secondo i pesi dell'archetipo
   const handleEditOvrChange = (newTarget: number) => {
     const target = Math.max(40, Math.min(99, newTarget));
-    setEditOvrInput(target);
     const newAttrs = generateAttributesFromOverall(editArchetype, target);
+    const finalCalculated = calculateArchetypeOverall(editArchetype, newAttrs);
     setEditAttributes(newAttrs);
+    setEditOvrInput(finalCalculated);
   };
 
-  // Cambio singola statistica nel modale -> ricalcola in tempo reale l'Overall
   const handleSingleStatChange = (statKey: string, val: number) => {
     const clampedVal = Math.max(40, Math.min(99, val));
     const updated = { ...editAttributes, [statKey]: clampedVal };
@@ -107,14 +130,13 @@ function AdminPage() {
     setEditOvrInput(newOvr);
   };
 
-  // Cambio Archetipo nel modale -> rigenera le stats adattandole al nuovo ruolo/archetipo
   const handleEditArchetypeChange = (newArchKey: string) => {
     setEditArchetype(newArchKey);
     const newAttrs = generateAttributesFromOverall(newArchKey, editOvrInput);
     setEditAttributes(newAttrs);
   };
 
-  // 3. Salvataggio Modifiche Giocatore (Mutazione)
+  // 3. Salvataggio Modifiche Giocatore
   const updatePlayerMutation = useMutation({
     mutationFn: async () => {
       if (!editingPlayer) return;
@@ -197,22 +219,41 @@ function AdminPage() {
     onError: (err: any) => alert(`Errore eliminazione: ${err.message}`),
   });
 
-  // 6. Sondaggio Partita
+  // 6. Sondaggio Partita (con supporto fino a 6 slot orari)
   const createPollMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase
+      if (!targetDate) throw new Error('Seleziona una data per la partita');
+      
+      const validSlots = timeSlots.map(s => s.trim()).filter(Boolean);
+      if (validSlots.length === 0) throw new Error('Inserisci almeno un orario valido');
+
+      let targetLeagueId = activeLeagueId;
+      if (!targetLeagueId || targetLeagueId === '00000000-0000-0000-0000-000000000001') {
+        const { data: firstLeague } = await supabase.from('leagues').select('id').limit(1).maybeSingle();
+        if (firstLeague?.id) targetLeagueId = firstLeague.id;
+      }
+
+      const { data, error } = await supabase
         .from('polls')
         .insert({
-          league_id: activeLeagueId || null,
+          league_id: targetLeagueId || null,
+          title: pollTitle.trim(),
           target_date: targetDate,
+          time_slots: validSlots,
           is_closed: false,
-        });
+        })
+        .select();
+
       if (error) throw new Error(error.message);
+      return data;
     },
     onSuccess: () => {
       alert('Sondaggio creato con successo!');
       queryClient.invalidateQueries({ queryKey: queryKeys.polls(activeLeagueId) });
       setTargetDate('');
+    },
+    onError: (err: any) => {
+      alert(`Errore creazione sondaggio: ${err.message}`);
     },
   });
 
@@ -265,11 +306,11 @@ function AdminPage() {
       <div className="border-b border-[#222c42] pb-3">
         <h1 className="font-bebas text-3xl text-slate-100">PANNELLO ADMIN</h1>
         <p className="text-xs text-slate-400">
-          Gestione rosa, archetipi, valori ponderati e simulazioni
+          Gestione rosa, archetipi, valori ponderati, sondaggi e simulazioni
         </p>
       </div>
 
-      {/* SEZIONE 1: CREA GIOCATORE FITTIZIO (SENZA MAGLIA) */}
+      {/* SEZIONE 1: CREA GIOCATORE FITTIZIO */}
       <div className="bg-[#151b28] p-4 rounded-xl border border-[#222c42] space-y-3">
         <h2 className="font-bebas text-xl text-amber-400">+ AGGIUNGI GIOCATORE</h2>
         <div className="space-y-3 text-xs">
@@ -404,11 +445,10 @@ function AdminPage() {
         </div>
       </div>
 
-      {/* MODALE ADMIN: MODIFICA COMPLETA STATS GIOCATORE */}
+      {/* MODALE ADMIN: MODIFICA COMPLETA STATS */}
       {editingPlayer && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 z-50 overflow-y-auto">
           <div className="bg-[#151b28] border border-[#222c42] rounded-2xl max-w-md w-full p-5 space-y-4 my-auto shadow-2xl">
-            {/* Header Modale */}
             <div className="flex justify-between items-start border-b border-[#222c42] pb-3">
               <div>
                 <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
@@ -424,7 +464,6 @@ function AdminPage() {
               </button>
             </div>
 
-            {/* Scelta Archetipo */}
             <div>
               <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">
                 Archetipo Calcolo Ponderato
@@ -442,14 +481,13 @@ function AdminPage() {
               </select>
             </div>
 
-            {/* OVERALL TARGET RAPIDO */}
             <div className="bg-[#0b0e14] p-3 rounded-xl border border-[#222c42] space-y-2">
               <div className="flex justify-between items-center">
                 <span className="text-xs font-bold text-slate-300">OVERALL CALCOLATO</span>
                 <span className="font-bebas text-3xl text-amber-400">{editOvrInput}</span>
               </div>
               <p className="text-[11px] text-slate-400 leading-tight">
-                Scorri per rigenerare in automatico tutte le 6 statistiche seguendo le percentuali del ruolo.
+                Imposta un nuovo Overall base per ridistribuire tutte le statistiche, oppure ritocca le singole stats sotto.
               </p>
               <input
                 type="range"
@@ -461,7 +499,6 @@ function AdminPage() {
               />
             </div>
 
-            {/* STATS SINGOLE PONDERATE */}
             <div>
               <label className="block text-[11px] font-bold text-slate-400 uppercase mb-2">
                 Rifinitura Singole Statistiche
@@ -489,7 +526,6 @@ function AdminPage() {
               </div>
             </div>
 
-            {/* GIOCO DI SQUADRA & EFFICACIA PORTIERE */}
             <div className="grid grid-cols-2 gap-3 pt-1">
               <div>
                 <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">
@@ -536,7 +572,6 @@ function AdminPage() {
               </div>
             </div>
 
-            {/* Bottoni Azione */}
             <div className="flex gap-2 pt-2 border-t border-[#222c42]">
               <button
                 type="button"
@@ -558,7 +593,71 @@ function AdminPage() {
         </div>
       )}
 
-      {/* SEZIONE 3: SIMULATORE & SONDAGGI */}
+      {/* SEZIONE 3: SONDAGGIO PARTITA CON ORARI */}
+      <div className="bg-[#151b28] p-4 rounded-xl border border-[#222c42] space-y-3">
+        <h2 className="font-bebas text-xl text-lime-400">NUOVO SONDAGGIO PARTITA</h2>
+        
+        <div>
+          <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
+            Data Partita
+          </label>
+          <input
+            type="date"
+            value={targetDate}
+            onChange={(e) => setTargetDate(e.target.value)}
+            className="w-full bg-[#0b0e14] border border-[#222c42] rounded-lg p-2.5 text-sm text-slate-100"
+          />
+        </div>
+
+        <div>
+          <div className="flex justify-between items-center mb-1">
+            <label className="text-[11px] font-bold uppercase text-slate-400">
+              Orari Proposti (Max 6)
+            </label>
+            {timeSlots.length < 6 && (
+              <button
+                type="button"
+                onClick={addTimeSlot}
+                className="text-[11px] font-bold text-lime-400 hover:underline"
+              >
+                + Aggiungi Orario
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {timeSlots.map((slot, index) => (
+              <div key={index} className="flex items-center gap-1 bg-[#0b0e14] border border-[#222c42] rounded-lg p-1.5">
+                <input
+                  type="time"
+                  value={slot}
+                  onChange={(e) => handleTimeSlotChange(index, e.target.value)}
+                  className="bg-transparent text-slate-100 text-xs w-full focus:outline-none"
+                />
+                {timeSlots.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeTimeSlot(index)}
+                    className="text-rose-400 px-1 font-bold text-xs"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <button
+          disabled={!targetDate || createPollMutation.isPending}
+          onClick={() => createPollMutation.mutate()}
+          className="w-full py-2.5 bg-lime-400 text-slate-950 font-bebas text-lg rounded-xl font-bold disabled:opacity-40 transition shadow-md"
+        >
+          {createPollMutation.isPending ? 'Creazione in corso...' : 'APRI SONDAGGIO'}
+        </button>
+      </div>
+
+      {/* SEZIONE 4: SIMULATORE PARTITE */}
       <div className="bg-[#151b28] p-4 rounded-xl border border-[#222c42] space-y-3">
         <h2 className="font-bebas text-xl text-sky-400">SIMULATORE PARTITE</h2>
         <div className="flex gap-2">
@@ -589,24 +688,7 @@ function AdminPage() {
         </div>
       </div>
 
-      <div className="bg-[#151b28] p-4 rounded-xl border border-[#222c42] space-y-3">
-        <h2 className="font-bebas text-xl text-lime-400">NUOVO SONDAGGIO PARTITA</h2>
-        <input
-          type="date"
-          value={targetDate}
-          onChange={(e) => setTargetDate(e.target.value)}
-          className="w-full bg-[#0b0e14] border border-[#222c42] rounded-lg p-2.5 text-sm text-slate-100"
-        />
-        <button
-          disabled={!targetDate || createPollMutation.isPending}
-          onClick={() => createPollMutation.mutate()}
-          className="w-full py-2.5 bg-lime-400 text-black font-bebas text-lg rounded-xl disabled:opacity-50"
-        >
-          {createPollMutation.isPending ? 'Creazione...' : 'APRI SONDAGGIO'}
-        </button>
-      </div>
-
-      {/* SEZIONE 4: RESET LEGA */}
+      {/* SEZIONE 5: RESET LEGA */}
       <div className="bg-rose-950/30 border border-rose-800/80 p-4 rounded-xl space-y-2">
         <h2 className="font-bebas text-xl text-rose-400">ZONA PERICOLO: RESET RISULTATI</h2>
         <button
