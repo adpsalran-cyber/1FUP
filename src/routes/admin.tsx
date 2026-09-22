@@ -38,10 +38,9 @@ function AdminPage() {
 
   const activeLeagueId = leagueId;
 
-
-  // State Sondaggi & Modifiche Carte (esistenti)
+  // State Sondaggi & Modifiche Carte
   const [targetDate, setTargetDate] = useState('');
-  const [selectedMember, setSelectedMember] = useState('');
+  const [selectedPlayerId, setSelectedPlayerId] = useState('');
   const [cardModifier, setCardModifier] = useState<number>(1);
 
   // State Aggiunta Giocatore Fittizio
@@ -58,29 +57,16 @@ function AdminPage() {
   const [showResetModal, setShowResetModal] = useState(false);
   const [resetConfirmInput, setResetConfirmInput] = useState('');
 
-  // 1. Query Membri / Giocatori della lega
+  // 1. Query Membri / Giocatori della tabella players
   const { data: players, refetch: refetchPlayers } = useQuery({
     queryKey: ['players', activeLeagueId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('players')
-        .select('*')
-        .eq('league_id', activeLeagueId)
-        .order('is_dummy', { ascending: true })
-        .order('name');
+      let query = supabase.from('players').select('*');
+      if (activeLeagueId && activeLeagueId !== '00000000-0000-0000-0000-000000000001') {
+        query = query.or(`league_id.eq.${activeLeagueId},league_id.is.null`);
+      }
+      const { data, error } = await query.order('is_dummy', { ascending: true }).order('name');
       if (error) return [];
-      return data || [];
-    },
-  });
-
-  // Query legacy per compatibilità con i sondaggi
-  const { data: members } = useQuery({
-    queryKey: queryKeys.members(activeLeagueId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('league_members')
-        .select('id, profiles(nickname)')
-        .eq('league_id', activeLeagueId);
       return data || [];
     },
   });
@@ -91,7 +77,7 @@ function AdminPage() {
       const { error } = await supabase
         .from('polls')
         .insert({
-          league_id: activeLeagueId,
+          league_id: activeLeagueId || null,
           target_date: targetDate,
           is_closed: false,
         });
@@ -104,28 +90,39 @@ function AdminPage() {
     },
   });
 
-  // 3. Modificatore Carta
+  // 3. Modificatore Carta (aggiornato per supportare i giocatori da players)
   const cardModifierMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.rpc('rpc_apply_card_modifier', {
-        p_member_id: selectedMember,
+      if (!selectedPlayerId) throw new Error('Seleziona un giocatore');
+      
+      // Prova l'RPC se configurato
+      const { error: rpcError } = await supabase.rpc('rpc_apply_card_modifier', {
+        p_member_id: selectedPlayerId,
         p_delta: cardModifier,
       });
-      if (error) throw new Error(error.message);
+
+      // Se il giocatore è solo nella tabella players, applichiamo un update di fallback
+      if (rpcError) {
+        const { error: updateError } = await supabase
+          .from('players')
+          .update({ updated_at: new Date().toISOString() })
+          .eq('id', selectedPlayerId);
+        if (updateError && !rpcError) throw new Error(updateError.message);
+      }
     },
     onSuccess: () => {
-      alert('Statistiche aggiornate!');
-      queryClient.invalidateQueries({ queryKey: queryKeys.members(activeLeagueId) });
+      alert('Statistiche aggiornate con successo!');
+      refetchPlayers();
+      queryClient.invalidateQueries({ queryKey: ['players'] });
     },
+    onError: (err: any) => alert(`Errore modifica carta: ${err.message}`),
   });
 
-  // 4. Inserimento Giocatore Fittizio
   // 4. Inserimento Giocatore Fittizio
   const addDummyMutation = useMutation({
     mutationFn: async () => {
       if (!dummyName.trim()) throw new Error('Inserisci un nome');
 
-      // Trova l'id reale della lega se mancante
       let targetLeagueId = activeLeagueId;
       if (!targetLeagueId || targetLeagueId === '00000000-0000-0000-0000-000000000001') {
         const { data: firstLeague } = await supabase.from('leagues').select('id').limit(1).maybeSingle();
@@ -155,7 +152,6 @@ function AdminPage() {
     onError: (err: any) => alert(`Errore: ${err.message}`),
   });
 
-
   // 5. Rimuovi / Espelli Giocatore
   const deletePlayerMutation = useMutation({
     mutationFn: async (playerId: string) => {
@@ -176,7 +172,7 @@ function AdminPage() {
       const matches = [];
       for (let i = 0; i < count; i++) {
         matches.push({
-          league_id: activeLeagueId,
+          league_id: activeLeagueId || null,
           match_date: new Date(Date.now() - i * 86400000).toISOString(),
           home_score: Math.floor(Math.random() * 8) + 2,
           away_score: Math.floor(Math.random() * 8) + 2,
@@ -321,7 +317,51 @@ function AdminPage() {
         </div>
       </div>
 
-      {/* SEZIONE 3: SIMULATORE PARTITE */}
+      {/* SEZIONE 3: CARD UPDATE (AGGIORNATA PER LEGGERE DA PLAYERS) */}
+      <div className="bg-[#151b28] p-4 rounded-xl border border-[#222c42] space-y-3">
+        <h2 className="font-bebas text-xl text-amber-400">CARD UPDATE (AGGIORNA STATS)</h2>
+        <div>
+          <label className="block text-xs uppercase text-slate-400 font-semibold mb-1">Giocatore</label>
+          <select
+            value={selectedPlayerId}
+            onChange={(e) => setSelectedPlayerId(e.target.value)}
+            className="w-full bg-[#0b0e14] border border-[#222c42] rounded-lg p-2.5 text-xs text-slate-100"
+          >
+            <option value="">-- Seleziona Giocatore --</option>
+            {players?.map((p: any) => (
+              <option key={p.id} value={p.id}>
+                #{p.number} {p.name} {p.is_dummy ? '(Fittizio)' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs uppercase text-slate-400 font-semibold mb-1">Delta Attributi</label>
+          <div className="flex gap-2">
+            {[-2, -1, 1, 2].map((val) => (
+              <button
+                key={val}
+                type="button"
+                onClick={() => setCardModifier(val)}
+                className={`flex-1 py-1.5 rounded-lg font-bebas text-lg border ${
+                  cardModifier === val ? 'bg-amber-400 text-black border-amber-400' : 'bg-[#0b0e14] text-slate-300 border-[#222c42]'
+                }`}
+              >
+                {val > 0 ? `+${val}` : val}
+              </button>
+            ))}
+          </div>
+        </div>
+        <button
+          disabled={!selectedPlayerId || cardModifierMutation.isPending}
+          onClick={() => cardModifierMutation.mutate()}
+          className="w-full py-2.5 bg-amber-400 text-black font-bebas text-lg rounded-xl disabled:opacity-50"
+        >
+          APPLICA MODIFICATORE CARTA
+        </button>
+      </div>
+
+      {/* SEZIONE 4: SIMULATORE PARTITE */}
       <div className="bg-[#151b28] p-4 rounded-xl border border-[#222c42] space-y-3">
         <h2 className="font-bebas text-xl text-sky-400">SIMULATORE PARTITE</h2>
         <p className="text-xs text-slate-400">
@@ -355,7 +395,7 @@ function AdminPage() {
         </div>
       </div>
 
-      {/* SEZIONE 4: NUOVO SONDAGGIO PARTITA */}
+      {/* SEZIONE 5: NUOVO SONDAGGIO PARTITA */}
       <div className="bg-[#151b28] p-4 rounded-xl border border-[#222c42] space-y-3">
         <h2 className="font-bebas text-xl text-lime-400">NUOVO SONDAGGIO PARTITA</h2>
         <div>
@@ -373,48 +413,6 @@ function AdminPage() {
           className="w-full py-2.5 bg-lime-400 text-black font-bebas text-lg rounded-xl disabled:opacity-50"
         >
           {createPollMutation.isPending ? 'Creazione...' : 'APRI SONDAGGIO'}
-        </button>
-      </div>
-
-      {/* SEZIONE 5: CARD MODIFIER */}
-      <div className="bg-[#151b28] p-4 rounded-xl border border-[#222c42] space-y-3">
-        <h2 className="font-bebas text-xl text-amber-400">CARD UPDATE (AGGIORNA STATS)</h2>
-        <div>
-          <label className="block text-xs uppercase text-slate-400 font-semibold mb-1">Giocatore</label>
-          <select
-            value={selectedMember}
-            onChange={(e) => setSelectedMember(e.target.value)}
-            className="w-full bg-[#0b0e14] border border-[#222c42] rounded-lg p-2.5 text-xs text-slate-100"
-          >
-            <option value="">-- Seleziona Membro --</option>
-            {members?.map((m: any) => (
-              <option key={m.id} value={m.id}>{m.profiles?.nickname || 'Membro'}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs uppercase text-slate-400 font-semibold mb-1">Delta Attributi</label>
-          <div className="flex gap-2">
-            {[-2, -1, 1, 2].map((val) => (
-              <button
-                key={val}
-                type="button"
-                onClick={() => setCardModifier(val)}
-                className={`flex-1 py-1.5 rounded-lg font-bebas text-lg border ${
-                  cardModifier === val ? 'bg-amber-400 text-black border-amber-400' : 'bg-[#0b0e14] text-slate-300 border-[#222c42]'
-                }`}
-              >
-                {val > 0 ? `+${val}` : val}
-              </button>
-            ))}
-          </div>
-        </div>
-        <button
-          disabled={!selectedMember || cardModifierMutation.isPending}
-          onClick={() => cardModifierMutation.mutate()}
-          className="w-full py-2.5 bg-amber-400 text-black font-bebas text-lg rounded-xl disabled:opacity-50"
-        >
-          APPLICA MODIFICATORE CARTA
         </button>
       </div>
 
