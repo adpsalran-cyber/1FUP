@@ -1,8 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useRouterState } from '@tanstack/react-router';
-import { supabase } from '../lib/engine';
+import { createClient } from '@supabase/supabase-js';
 import { AuthModal } from './AuthModal';
 import { LeagueModal } from './LeagueModal';
+
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL || '',
+  import.meta.env.VITE_SUPABASE_ANON_KEY || ''
+);
 
 interface LayoutProps {
   children: React.ReactNode;
