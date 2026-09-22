@@ -13,10 +13,31 @@ export const Route = createRoute({
 function AdminPage() {
   const queryClient = useQueryClient();
 
-  // Recupera la lega attiva salvata nel browser, altrimenti usa quella di default
-  const activeLeagueId = typeof window !== 'undefined' 
-    ? localStorage.getItem('active_league_id') || '00000000-0000-0000-0000-000000000001'
-    : '00000000-0000-0000-0000-000000000001';
+  // Recupera la lega salvata o la prima lega reale dell'utente
+  const [leagueId, setLeagueId] = useState<string>(
+    typeof window !== 'undefined' 
+      ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id') || ''
+      : ''
+  );
+
+  // Se non c'è nel localStorage, recupera l'ID reale della prima lega disponibile su Supabase
+  useQuery({
+    queryKey: ['admin_active_league'],
+    queryFn: async () => {
+      if (leagueId) return leagueId;
+      const { data } = await supabase.from('leagues').select('id').limit(1).maybeSingle();
+      if (data?.id) {
+        setLeagueId(data.id);
+        localStorage.setItem('alci_league_id', data.id);
+        localStorage.setItem('active_league_id', data.id);
+        return data.id;
+      }
+      return '';
+    },
+  });
+
+  const activeLeagueId = leagueId;
+
 
   // State Sondaggi & Modifiche Carte (esistenti)
   const [targetDate, setTargetDate] = useState('');
