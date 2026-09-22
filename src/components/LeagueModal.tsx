@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -18,12 +18,23 @@ const ARCHETYPES = {
   Attaccante: ['Bomber d\'Area', 'Boa / Sponda', 'Falso Nueve', 'Folletto Rapido'],
 };
 
+interface UserLeague {
+  league_id: string;
+  role: string;
+  name: string;
+  invite_code: string;
+}
+
 export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelected }) => {
   const [step, setStep] = useState<'league' | 'profile'>('league');
-  const [leagueMode, setLeagueMode] = useState<'join' | 'create'>('join');
+  const [leagueMode, setLeagueMode] = useState<'my_leagues' | 'join' | 'create'>('my_leagues');
+  const [myLeagues, setMyLeagues] = useState<UserLeague[]>([]);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
+
   const [leagueName, setLeagueName] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [currentLeagueId, setCurrentLeagueId] = useState<string | null>(null);
+  const [currentRole, setCurrentRole] = useState<string>('member');
 
   // Profilo Giocatore
   const [profileMode, setProfileMode] = useState<'create' | 'claim'>('create');
@@ -38,7 +49,42 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
   const [selectedDummyId, setSelectedDummyId] = useState('');
 
   const [loading, setLoading] = useState(false);
+  const [fetchingLeagues, setFetchingLeagues] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Carica le leghe a cui l'utente appartiene già
+  useEffect(() => {
+    fetchUserLeagues();
+  }, [userId]);
+
+  const fetchUserLeagues = async () => {
+    setFetchingLeagues(true);
+    const { data, error: err } = await supabase
+      .from('league_members')
+      .select('league_id, role, leagues(id, name, invite_code)')
+      .eq('user_id', userId);
+
+    if (!err && data) {
+      const list: UserLeague[] = data
+        .filter((item: any) => item.leagues)
+        .map((item: any) => ({
+          league_id: item.league_id,
+          role: item.role,
+          name: item.leagues?.name || 'Lega Senza Nome',
+          invite_code: item.leagues?.invite_code || '',
+        }));
+
+      setMyLeagues(list);
+      if (list.length === 0) {
+        setLeagueMode('create');
+      } else {
+        setLeagueMode('my_leagues');
+      }
+    } else {
+      setLeagueMode('create');
+    }
+    setFetchingLeagues(false);
+  };
 
   const fetchDummies = async (leagueId: string) => {
     const { data: dummies } = await supabase
@@ -52,7 +98,34 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
     }
   };
 
-  // Gestione creazione o join lega
+  // Selezione di una lega esistente dall'elenco "Le mie leghe"
+  const handleSelectExistingLeague = async (league: UserLeague) => {
+    setCurrentLeagueId(league.league_id);
+    setCurrentRole(league.role);
+
+    // Controlla se ha già una carta giocatore per questa lega
+    const { data: existingPlayer } = await supabase
+      .from('players')
+      .select('id')
+      .eq('league_id', league.league_id)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (existingPlayer) {
+      onLeagueSelected(league.league_id, league.role);
+    } else {
+      await fetchDummies(league.league_id);
+      setStep('profile');
+    }
+  };
+
+  const handleCopyCode = (code: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedCode(code);
+    setTimeout(() => setCopiedCode(null), 2000);
+  };
+
+  // Creazione o join lega
   const handleLeagueSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -76,8 +149,9 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
         });
 
         setCurrentLeagueId(newLeague.id);
+        setCurrentRole('admin');
         setStep('profile');
-      } else {
+      } else if (leagueMode === 'join') {
         const { data: league, error: findErr } = await supabase
           .from('leagues')
           .select('id, name')
@@ -93,6 +167,7 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
         });
 
         setCurrentLeagueId(league.id);
+        setCurrentRole('member');
         await fetchDummies(league.id);
         setStep('profile');
       }
@@ -103,7 +178,7 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
     }
   };
 
-  // Gestione profilo giocatore
+  // Gestione profilo calciatore
   const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentLeagueId) return;
@@ -112,7 +187,6 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
 
     try {
       if (profileMode === 'claim' && selectedDummyId) {
-        // Usa la funzione SQL sicura claim_player
         const { error: claimErr } = await supabase.rpc('claim_player', {
           p_player_id: selectedDummyId,
           p_user_id: userId,
@@ -134,7 +208,7 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
         if (playerErr) throw playerErr;
       }
 
-      onLeagueSelected(currentLeagueId, leagueMode === 'create' ? 'admin' : 'member');
+      onLeagueSelected(currentLeagueId, currentRole);
     } catch (err: any) {
       setError(err.message || 'Errore durante la creazione del profilo');
     } finally {
@@ -148,30 +222,42 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
         {step === 'league' ? (
           <div>
             <h2 className="mb-1 text-center font-bebas text-3xl tracking-wide text-amber-400">
-              BENVENUTO NELL'HUB
+              HUB DELLE LEGHE
             </h2>
             <p className="mb-5 text-center text-xs text-slate-400">
-              Unisciti al torneo della tua comitiva o fondane uno nuovo
+              Scegli una tua lega, inserisci un codice o fondane una nuova
             </p>
 
-            <div className="mb-5 flex rounded-xl bg-slate-900/90 p-1 border border-slate-800">
+            {/* Menu modalità a 3 Tab */}
+            <div className="mb-5 flex rounded-xl bg-slate-900/90 p-1 border border-slate-800 text-[11px] font-bold">
+              {myLeagues.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { setLeagueMode('my_leagues'); setError(null); }}
+                  className={`flex-1 rounded-lg py-2 transition uppercase ${
+                    leagueMode === 'my_leagues' ? 'bg-amber-400 text-slate-950 shadow' : 'text-slate-400'
+                  }`}
+                >
+                  Le Mie ({myLeagues.length})
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => setLeagueMode('join')}
-                className={`flex-1 rounded-lg py-2 text-xs font-semibold uppercase transition ${
-                  leagueMode === 'join' ? 'bg-amber-400 text-slate-950 shadow' : 'text-slate-400'
-                }`}
-              >
-                Inserisci Codice
-              </button>
-              <button
-                type="button"
-                onClick={() => setLeagueMode('create')}
-                className={`flex-1 rounded-lg py-2 text-xs font-semibold uppercase transition ${
+                onClick={() => { setLeagueMode('create'); setError(null); }}
+                className={`flex-1 rounded-lg py-2 transition uppercase ${
                   leagueMode === 'create' ? 'bg-amber-400 text-slate-950 shadow' : 'text-slate-400'
                 }`}
               >
-                Crea Nuova Lega
+                Crea Lega
+              </button>
+              <button
+                type="button"
+                onClick={() => { setLeagueMode('join'); setError(null); }}
+                className={`flex-1 rounded-lg py-2 transition uppercase ${
+                  leagueMode === 'join' ? 'bg-amber-400 text-slate-950 shadow' : 'text-slate-400'
+                }`}
+              >
+                Unisciti
               </button>
             </div>
 
@@ -181,45 +267,102 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
               </div>
             )}
 
-            <form onSubmit={handleLeagueSubmit} className="space-y-4">
-              {leagueMode === 'join' ? (
-                <div>
-                  <label className="mb-1 block text-xs font-semibold uppercase text-slate-400">
-                    Codice Invito Lega
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={inviteCode}
-                    onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
-                    placeholder="ES: ALCI-9X2A"
-                    className="w-full rounded-xl border border-slate-800 bg-slate-900/80 px-4 py-2.5 text-center font-mono tracking-widest text-amber-400 focus:border-amber-400 focus:outline-none"
-                  />
-                </div>
-              ) : (
-                <div>
-                  <label className="mb-1 block text-xs font-semibold uppercase text-slate-400">
-                    Nome della Lega / Torneo
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={leagueName}
-                    onChange={(e) => setLeagueName(e.target.value)}
-                    placeholder="es. Calcetto del Martedì"
-                    className="w-full rounded-xl border border-slate-800 bg-slate-900/80 px-4 py-2.5 text-sm text-slate-100 focus:border-amber-400 focus:outline-none"
-                  />
-                </div>
-              )}
+            {/* TAB 1: LISTA DELLE MIE LEGHE ESISTENTI */}
+            {leagueMode === 'my_leagues' && (
+              <div className="space-y-3">
+                {fetchingLeagues ? (
+                  <p className="py-6 text-center font-bebas text-amber-400">CARICAMENTO LEGHE...</p>
+                ) : myLeagues.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-slate-400">
+                    Non fai parte di nessuna lega al momento. Creane una o unisciti tramite codice!
+                  </div>
+                ) : (
+                  myLeagues.map((lg) => (
+                    <div
+                      key={lg.league_id}
+                      className="rounded-xl border border-slate-800 bg-slate-900/80 p-3.5 flex flex-col gap-2 hover:border-amber-400/40 transition"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-bebas text-xl text-slate-100 tracking-wide block">
+                            {lg.name}
+                          </span>
+                          <span className="text-[10px] uppercase font-bold text-amber-400">
+                            Ruolo: {lg.role === 'admin' ? 'Amministratore' : 'Membro'}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => handleSelectExistingLeague(lg)}
+                          className="rounded-lg bg-amber-400 px-3 py-1.5 font-bebas text-xs tracking-wider text-slate-950 hover:bg-amber-300 transition"
+                        >
+                          ENTRA
+                        </button>
+                      </div>
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full rounded-xl bg-amber-400 py-3 font-bebas text-lg tracking-wider text-slate-950 transition hover:bg-amber-300 disabled:opacity-50"
-              >
-                {loading ? 'ELABORAZIONE...' : leagueMode === 'join' ? 'ENTRA NELLA LEGA' : 'CREA E DIVENTA ADMIN'}
-              </button>
-            </form>
+                      {/* Box Codice Invito */}
+                      <div className="flex items-center justify-between bg-[#0b0e14] rounded-lg px-2.5 py-1.5 border border-slate-800 text-xs">
+                        <span className="text-[11px] text-slate-400">
+                          Codice: <strong className="text-amber-400 font-mono tracking-widest">{lg.invite_code}</strong>
+                        </span>
+                        <button
+                          onClick={() => handleCopyCode(lg.invite_code)}
+                          className="text-[10px] font-bold text-slate-300 hover:text-white bg-slate-800 px-2 py-0.5 rounded transition"
+                        >
+                          {copiedCode === lg.invite_code ? 'COPIATO! ✓' : 'COPIA'}
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            {/* TAB 2 & 3: FORM CREAZIONE O INGRESSO CON CODICE */}
+            {leagueMode !== 'my_leagues' && (
+              <form onSubmit={handleLeagueSubmit} className="space-y-4">
+                {leagueMode === 'join' ? (
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase text-slate-400">
+                      Codice Invito Lega
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={inviteCode}
+                      onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                      placeholder="ES: ALCI-9X2A"
+                      className="w-full rounded-xl border border-slate-800 bg-slate-900/80 px-4 py-2.5 text-center font-mono tracking-widest text-amber-400 focus:border-amber-400 focus:outline-none"
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase text-slate-400">
+                      Nome della Lega / Torneo
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={leagueName}
+                      onChange={(e) => setLeagueName(e.target.value)}
+                      placeholder="es. Calcetto del Martedì"
+                      className="w-full rounded-xl border border-slate-800 bg-slate-900/80 px-4 py-2.5 text-sm text-slate-100 focus:border-amber-400 focus:outline-none"
+                    />
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full rounded-xl bg-amber-400 py-3 font-bebas text-lg tracking-wider text-slate-950 transition hover:bg-amber-300 disabled:opacity-50"
+                >
+                  {loading
+                    ? 'ELABORAZIONE...'
+                    : leagueMode === 'join'
+                    ? 'UNISCITI ALLA LEGA'
+                    : 'CREA E GENERA CODICE INVITO'}
+                </button>
+              </form>
+            )}
           </div>
         ) : (
           <div>
@@ -227,7 +370,7 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
               SCHEDA CALCIATORE
             </h2>
             <p className="mb-4 text-center text-xs text-slate-400">
-              Configura il tuo stile di gioco per le pagelle e statistiche
+              Configura la tua carta per la lega selezionata
             </p>
 
             {dummyPlayers.length > 0 && (
@@ -290,7 +433,7 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
                       required
                       value={playerName}
                       onChange={(e) => setPlayerName(e.target.value)}
-                      placeholder="es. Leo Messi"
+                      placeholder="es. Salvatore"
                       className="w-full rounded-xl border border-slate-800 bg-slate-900/80 px-4 py-2 text-sm text-slate-100 focus:border-amber-400 focus:outline-none"
                     />
                   </div>
