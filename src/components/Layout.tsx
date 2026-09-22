@@ -165,13 +165,13 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             Home
           </Link>
           <Link
-            to="/polls"
+            to="/matches"
             className={`flex flex-col items-center gap-1 text-[11px] font-medium tracking-wide uppercase transition ${
-              currentPath === '/polls' ? 'text-amber-400' : 'text-slate-400 hover:text-slate-200'
+              currentPath === '/matches' ? 'text-amber-400' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <span className="text-lg">⭐</span>
-            Pagelle
+            <span className="text-lg">⚔️</span>
+            Partite
           </Link>
           <Link
             to="/standings"
