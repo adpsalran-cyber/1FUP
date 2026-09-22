@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createRoute } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Route as rootRoute } from './__root';
-import { queryKeys, supabase, submitPollPreference, cancelPollReservation } from '../lib/actions';
+import { supabase } from '../lib/actions';
 
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
@@ -12,62 +12,135 @@ export const Route = createRoute({
 
 function PollsPage() {
   const queryClient = useQueryClient();
-  const LEAGUE_ID = '00000000-0000-0000-0000-000000000001';
+  const [activeLeagueId, setActiveLeagueId] = useState<string | null>(
+    typeof window !== 'undefined'
+      ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
+      : null
+  );
 
   const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
-  const [selectedMemberId, setSelectedMemberId] = useState<string>('');
+  const [selectedPlayerId, setSelectedPlayerId] = useState<string>('');
 
-  const { data: poll, isLoading: pollLoading } = useQuery({
-    queryKey: queryKeys.activePoll(LEAGUE_ID),
+  useEffect(() => {
+    if (!activeLeagueId) {
+      supabase.from('leagues').select('id').limit(1).maybeSingle().then(({ data }) => {
+        if (data?.id) {
+          setActiveLeagueId(data.id);
+          localStorage.setItem('alci_league_id', data.id);
+          localStorage.setItem('active_league_id', data.id);
+        }
+      });
+    }
+  }, [activeLeagueId]);
+
+  // Recupera il sondaggio aperto più recente
+  const { data: poll, isLoading: pollLoading, refetch: refetchPoll } = useQuery({
+    queryKey: ['active_poll', activeLeagueId],
     queryFn: async () => {
-      const { data } = await supabase
+      let query = supabase
         .from('polls')
         .select('*')
-        .eq('league_id', LEAGUE_ID)
-        .eq('is_closed', false)
+        .eq('is_closed', false);
+
+      if (activeLeagueId) {
+        query = query.or(`league_id.eq.${activeLeagueId},league_id.is.null`);
+      }
+
+      const { data, error } = await query
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
+
+      if (error) return null;
       return data;
     },
   });
 
-  const { data: members } = useQuery({
-    queryKey: queryKeys.members(LEAGUE_ID),
+  // Recupera i giocatori registrati nella lega per il menu a tendina
+  const { data: players } = useQuery({
+    queryKey: ['poll_players', activeLeagueId],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('league_members')
-        .select('id, profile_id, profiles(nickname)')
-        .eq('league_id', LEAGUE_ID);
+      let query = supabase.from('players').select('id, name, role');
+      if (activeLeagueId) {
+        query = query.or(`league_id.eq.${activeLeagueId},league_id.is.null`);
+      }
+      const { data } = await query.order('name');
       return data || [];
     },
   });
 
-  const { data: votes } = useQuery({
-    queryKey: queryKeys.pollVotes(poll?.id || ''),
-    enabled: !!poll?.id,
+  // Recupera i voti espressi per questo sondaggio
+  const { data: votes, refetch: refetchVotes } = useQuery({
+    queryKey: ['poll_votes', poll?.id],
+    enabled: Boolean(poll?.id),
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('poll_votes')
-        .select('*, league_members(profiles(nickname))')
+        .select('*, players(name, role)')
         .eq('poll_id', poll!.id)
-        .order('registered_at', { ascending: true });
+        .order('created_at', { ascending: true });
+
+      if (error) return [];
       return data || [];
     },
   });
 
+  // Mutazione per votare o cambiare voto
   const voteMutation = useMutation({
-    mutationFn: () =>
-      submitPollPreference(queryClient, LEAGUE_ID, {
-        pollId: poll!.id,
-        memberId: selectedMemberId,
-        selectedSlots,
-      }),
+    mutationFn: async () => {
+      if (!poll?.id || !selectedPlayerId) throw new Error('Seleziona il tuo nome');
+      if (selectedSlots.length === 0) throw new Error('Seleziona almeno una fascia oraria');
+
+      const currentVotes = votes || [];
+      const isAlreadyConfirmed = currentVotes.some((v: any) => v.player_id === selectedPlayerId && v.is_confirmed);
+      const isConfirmed = isAlreadyConfirmed || currentVotes.filter((v: any) => v.is_confirmed).length < 10;
+      const queuePosition = isConfirmed ? null : currentVotes.filter((v: any) => !v.is_confirmed).length + 1;
+
+      const { error } = await supabase
+        .from('poll_votes')
+        .upsert(
+          {
+            poll_id: poll.id,
+            player_id: selectedPlayerId,
+            selected_slots: selectedSlots,
+            is_confirmed: isConfirmed,
+            queue_position: queuePosition,
+            created_at: new Date().toISOString(),
+          },
+          { onConflict: 'poll_id,player_id' }
+        );
+
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      alert('Presenza e preferenze registrate!');
+      refetchVotes();
+      queryClient.invalidateQueries({ queryKey: ['home_poll_responses'] });
+      queryClient.invalidateQueries({ queryKey: ['home_latest_poll'] });
+    },
+    onError: (err: any) => alert(`Errore salvataggio voto: ${err.message}`),
   });
 
+  // Ritiro della presenza
   const cancelMutation = useMutation({
-    mutationFn: () =>
-      cancelPollReservation(queryClient, LEAGUE_ID, poll!.id, selectedMemberId),
+    mutationFn: async () => {
+      if (!poll?.id || !selectedPlayerId) return;
+      const { error } = await supabase
+        .from('poll_votes')
+        .delete()
+        .eq('poll_id', poll.id)
+        .eq('player_id', selectedPlayerId);
+
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      alert('Presenza ritirata.');
+      setSelectedSlots([]);
+      refetchVotes();
+      queryClient.invalidateQueries({ queryKey: ['home_poll_responses'] });
+      queryClient.invalidateQueries({ queryKey: ['home_latest_poll'] });
+    },
+    onError: (err: any) => alert(`Errore ritiro: ${err.message}`),
   });
 
   const toggleSlot = (slot: string) => {
@@ -79,47 +152,93 @@ function PollsPage() {
   const confirmedVotes = votes?.filter((v: any) => v.is_confirmed) || [];
   const waitingVotes = votes?.filter((v: any) => !v.is_confirmed) || [];
 
-  if (pollLoading) return <div className="p-6 text-center text-slate-400">Caricamento sondaggio...</div>;
-  if (!poll) return <div className="p-6 text-center text-slate-400">Nessun sondaggio convocazione attivo.</div>;
+  if (pollLoading) {
+    return <div className="p-8 text-center text-slate-400 font-bebas text-xl animate-pulse">CARICAMENTO SONDAGGIO...</div>;
+  }
+
+  if (!poll) {
+    return (
+      <div className="p-4 max-w-lg mx-auto space-y-4">
+        <div className="border-b border-[#222c42] pb-3">
+          <h1 className="font-bebas text-3xl text-slate-100">SONDAGGI CONVOCAZIONI</h1>
+        </div>
+        <div className="bg-[#151b28] border border-[#222c42] rounded-xl p-8 text-center space-y-2">
+          <p className="font-bebas text-xl text-slate-300">NESSUN SONDAGGIO APERTO</p>
+          <p className="text-xs text-slate-400">L'amministratore non ha ancora aperto le convocazioni per la prossima partita.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const availableSlots: string[] = poll.time_slots && poll.time_slots.length > 0
+    ? poll.time_slots
+    : ['19:30', '20:00', '20:30', '21:00', '21:30', '22:00'];
 
   return (
-    <div className="p-4 space-y-5">
-      <div className="border-b border-[#222c42] pb-3">
-        <h1 className="font-bebas text-3xl text-slate-100">SONDAGGIO CONVOCAZIONI</h1>
-        <p className="text-xs text-slate-400">Data bersaglio: {new Date(poll.target_date).toLocaleDateString('it-IT')}</p>
+    <div className="p-4 space-y-5 pb-24 max-w-lg mx-auto">
+      <div className="border-b border-[#222c42] pb-3 flex justify-between items-end">
+        <div>
+          <h1 className="font-bebas text-3xl text-slate-100">SONDAGGIO PARTITA</h1>
+          <p className="text-xs text-slate-400">
+            {poll.title || 'Partita di Calcetto'} • Data: <strong className="text-lime-400">{poll.target_date}</strong>
+          </p>
+        </div>
+        <button
+          onClick={() => { refetchPoll(); refetchVotes(); }}
+          className="text-xs text-slate-400 hover:text-white underline"
+        >
+          Aggiorna
+        </button>
       </div>
 
-      <div className="bg-[#151b28] p-4 rounded-xl border border-[#222c42] space-y-4">
+      {/* SELETTORE NOME & SLOT ORARI */}
+      <div className="bg-[#151b28] p-4 rounded-xl border border-[#222c42] space-y-4 shadow-xl">
         <div>
-          <label className="block text-xs uppercase text-slate-400 font-semibold mb-1">Seleziona il tuo Profilo</label>
+          <label className="block text-xs uppercase text-slate-400 font-semibold mb-1">
+            Chi Sei? (Seleziona il tuo Profilo)
+          </label>
           <select
-            value={selectedMemberId}
-            onChange={(e) => setSelectedMemberId(e.target.value)}
-            className="w-full bg-[#0b0e14] border border-[#222c42] rounded-lg p-2.5 text-sm text-slate-100 focus:outline-none focus:border-lime-400"
+            value={selectedPlayerId}
+            onChange={(e) => {
+              const pid = e.target.value;
+              setSelectedPlayerId(pid);
+              const existing = votes?.find((v: any) => v.player_id === pid);
+              if (existing?.selected_slots) {
+                setSelectedSlots(existing.selected_slots);
+              }
+            }}
+            className="w-full bg-[#0b0e14] border border-[#222c42] rounded-lg p-2.5 text-sm text-slate-100 focus:outline-none focus:border-lime-400 font-semibold"
           >
-            <option value="">-- Seleziona Giocatore --</option>
-            {members?.map((m: any) => (
-              <option key={m.id} value={m.id}>
-                {m.profiles?.nickname || 'Senza nome'}
+            <option value="">-- Seleziona il tuo Nome --</option>
+            {players?.map((p: any) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.role || 'ATT'})
               </option>
             ))}
           </select>
         </div>
 
         <div>
-          <label className="block text-xs uppercase text-slate-400 font-semibold mb-2">Fasce Orarie Disponibili</label>
-          <div className="grid grid-cols-3 gap-2">
-            {poll.time_slots?.map((slot: string) => {
+          <div className="flex justify-between items-center mb-2">
+            <label className="text-xs uppercase text-slate-400 font-semibold">
+              Orari in cui sei Disponibile (Scelta Multipla)
+            </label>
+            <span className="text-[10px] text-lime-400 font-mono">
+              {selectedSlots.length} selezionati
+            </span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {availableSlots.map((slot) => {
               const isSelected = selectedSlots.includes(slot);
               return (
                 <button
                   type="button"
                   key={slot}
                   onClick={() => toggleSlot(slot)}
-                  className={`py-2 rounded-lg font-bebas text-lg border transition-colors ${
+                  className={`py-2 px-1 rounded-lg font-bebas text-lg border transition ${
                     isSelected
-                      ? 'bg-lime-400 text-black border-lime-400 font-bold'
-                      : 'bg-[#0b0e14] text-slate-300 border-[#222c42]'
+                      ? 'bg-lime-400 text-slate-950 border-lime-400 font-bold shadow'
+                      : 'bg-[#0b0e14] text-slate-300 border-[#222c42] hover:border-slate-600'
                   }`}
                 >
                   {slot}
@@ -129,63 +248,96 @@ function PollsPage() {
           </div>
         </div>
 
-        <div className="flex gap-2 pt-2">
+        <div className="flex gap-2 pt-2 border-t border-[#222c42]">
           <button
             type="button"
-            disabled={!selectedMemberId || selectedSlots.length === 0 || voteMutation.isPending}
+            disabled={!selectedPlayerId || selectedSlots.length === 0 || voteMutation.isPending}
             onClick={() => voteMutation.mutate()}
-            className="flex-1 py-3 bg-lime-400 disabled:opacity-50 text-black font-bebas text-lg rounded-xl transition-all"
+            className="flex-1 py-3 bg-lime-400 disabled:opacity-40 text-slate-950 font-bebas text-xl rounded-xl transition font-bold shadow-md"
           >
-            {voteMutation.isPending ? 'Salvataggio...' : 'CONFERMA VOTO'}
+            {voteMutation.isPending ? 'Salvataggio...' : 'CONFERMA PRESENZA'}
           </button>
           <button
             type="button"
-            disabled={!selectedMemberId || cancelMutation.isPending}
+            disabled={!selectedPlayerId || cancelMutation.isPending}
             onClick={() => cancelMutation.mutate()}
-            className="px-4 py-3 bg-rose-500/20 text-rose-400 border border-rose-500/30 disabled:opacity-50 font-bebas text-lg rounded-xl"
+            className="px-4 py-3 bg-rose-500/20 text-rose-400 border border-rose-500/30 disabled:opacity-40 font-bebas text-lg rounded-xl hover:bg-rose-500/30 transition"
           >
             RITIRA
           </button>
         </div>
       </div>
 
+      {/* LISTA CONVOCATI */}
       <div className="space-y-4">
         <div>
-          <h2 className="font-bebas text-xl text-lime-400 tracking-wide mb-2">
-            CONFERMATI NEI PRIMI 10 ({confirmedVotes.length}/10)
-          </h2>
+          <div className="flex justify-between items-center mb-2">
+            <h2 className="font-bebas text-xl text-lime-400 tracking-wide">
+              CONFERMATI IN SQUADRA ({confirmedVotes.length}/10)
+            </h2>
+            {confirmedVotes.length >= 10 && (
+              <span className="text-[10px] font-bold uppercase bg-amber-400/20 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded">
+                Rosa al Completo
+              </span>
+            )}
+          </div>
+
           <div className="space-y-1.5">
             {confirmedVotes.map((v: any, index: number) => (
-              <div key={v.id} className="flex justify-between items-center p-2.5 rounded-lg bg-[#151b28] border border-[#222c42]">
+              <div
+                key={v.id}
+                className="flex justify-between items-center p-2.5 rounded-xl bg-[#151b28] border border-[#222c42]"
+              >
                 <div className="flex items-center space-x-2">
                   <span className="font-bebas text-lime-400 w-5 text-sm">{index + 1}.</span>
-                  <span className="text-sm font-semibold text-slate-100">{v.league_members?.profiles?.nickname || 'Membro'}</span>
+                  <div>
+                    <span className="text-sm font-semibold text-slate-100 block leading-tight">
+                      {v.players?.name || 'Giocatore'}
+                    </span>
+                    <span className="text-[10px] text-slate-400 uppercase font-semibold">
+                      {v.players?.role || 'ATT'}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex gap-1">
+                <div className="flex gap-1 flex-wrap justify-end">
                   {v.selected_slots?.map((s: string) => (
-                    <span key={s} className="px-1.5 py-0.5 rounded text-[10px] bg-[#0b0e14] text-slate-300 border border-[#222c42]">
+                    <span
+                      key={s}
+                      className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-[#0b0e14] text-slate-300 border border-[#222c42]"
+                    >
                       {s}
                     </span>
                   ))}
                 </div>
               </div>
             ))}
+            {confirmedVotes.length === 0 && (
+              <p className="text-xs text-slate-500 italic p-3 text-center bg-[#151b28]/50 rounded-xl border border-[#222c42]">
+                Ancora nessun giocatore confermato. Sii il primo a registrarti!
+              </p>
+            )}
           </div>
         </div>
 
+        {/* LISTA D'ATTESA */}
         {waitingVotes.length > 0 && (
           <div>
             <h2 className="font-bebas text-xl text-amber-400 tracking-wide mb-2">
-              LISTA D'ATTESA (CODA)
+              LISTA D'ATTESA / RISERVE ({waitingVotes.length})
             </h2>
             <div className="space-y-1.5">
               {waitingVotes.map((v: any) => (
-                <div key={v.id} className="flex justify-between items-center p-2.5 rounded-lg bg-[#151b28]/60 border border-amber-500/20">
+                <div
+                  key={v.id}
+                  className="flex justify-between items-center p-2.5 rounded-xl bg-[#151b28]/60 border border-amber-500/20"
+                >
                   <div className="flex items-center space-x-2">
-                    <span className="font-bebas text-amber-400 w-5 text-sm">+{v.queue_position}</span>
-                    <span className="text-sm text-slate-300">{v.league_members?.profiles?.nickname || 'Membro'}</span>
+                    <span className="font-bebas text-amber-400 w-6 text-sm">+{v.queue_position}</span>
+                    <span className="text-sm text-slate-300">{v.players?.name || 'Giocatore'}</span>
                   </div>
-                  <span className="text-xs text-amber-400/80 font-semibold">In attesa</span>
+                  <span className="text-[11px] text-amber-400/80 font-semibold bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/20">
+                    Riserva
+                  </span>
                 </div>
               ))}
             </div>
