@@ -120,11 +120,22 @@ function AdminPage() {
   });
 
   // 4. Inserimento Giocatore Fittizio
+  // 4. Inserimento Giocatore Fittizio
   const addDummyMutation = useMutation({
     mutationFn: async () => {
       if (!dummyName.trim()) throw new Error('Inserisci un nome');
+
+      // Trova l'id reale della lega se mancante
+      let targetLeagueId = activeLeagueId;
+      if (!targetLeagueId || targetLeagueId === '00000000-0000-0000-0000-000000000001') {
+        const { data: firstLeague } = await supabase.from('leagues').select('id').limit(1).maybeSingle();
+        if (firstLeague?.id) {
+          targetLeagueId = firstLeague.id;
+        }
+      }
+
       const { error } = await supabase.from('players').insert({
-        league_id: activeLeagueId,
+        league_id: targetLeagueId || null,
         name: dummyName.trim(),
         number: Number(dummyNumber),
         position: dummyPosition,
@@ -136,13 +147,14 @@ function AdminPage() {
       if (error) throw new Error(error.message);
     },
     onSuccess: () => {
-      alert(`Giocatore fittizio "${dummyName}" creato con successo!`);
+      alert(`Giocatore "${dummyName}" aggiunto con successo!`);
       setDummyName('');
       refetchPlayers();
       queryClient.invalidateQueries({ queryKey: ['players'] });
     },
     onError: (err: any) => alert(`Errore: ${err.message}`),
   });
+
 
   // 5. Rimuovi / Espelli Giocatore
   const deletePlayerMutation = useMutation({
