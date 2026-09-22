@@ -4,12 +4,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Route as rootRoute } from './__root';
 import { supabase } from '../lib/actions';
 
-export const Route = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/matches',
-  component: MatchesPage,
-});
-
 function MatchesPage() {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'giocate' | 'programmate' | 'storico'>('giocate');
@@ -224,3 +218,11 @@ function MatchesPage() {
     </div>
   );
 }
+
+export const Route = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/matches',
+  component: MatchesPage,
+});
+
+export const MatchesRoute = Route;
