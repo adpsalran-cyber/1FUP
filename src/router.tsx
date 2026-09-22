@@ -7,13 +7,7 @@ import { Route as standingsRoute } from './routes/standings';
 import { Route as playersRoute } from './routes/players';
 import { Route as matchDetailRoute } from './routes/matches.$matchId';
 import { Route as adminRoute } from './routes/admin';
-import { MatchesRoute } from './routes/matches';
-
-const matchesListRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/matches',
-  component: MatchesRoute,
-});
+import { Route as matchesRoute } from './routes/matches';
 
 const profileRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -30,9 +24,9 @@ const routeTree = rootRoute.addChildren([
   pollsRoute,
   standingsRoute,
   playersRoute,
+  matchesRoute,
   matchDetailRoute,
   adminRoute,
-  matchesListRoute,
   profileRoute,
 ]);
 
