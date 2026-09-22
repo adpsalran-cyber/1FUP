@@ -17,6 +17,10 @@ function PlayersPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [selectedPlayer, setSelectedPlayer] = useState<any | null>(null);
 
+  const leagueId = typeof window !== 'undefined'
+    ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
+    : null;
+
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) setCurrentUserId(user.id);
@@ -24,15 +28,14 @@ function PlayersPage() {
   }, []);
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['players_all'],
+    queryKey: ['players_all', leagueId],
     queryFn: async () => {
-      const res = await supabase
-        .from('players')
-        .select('*');
-      
-      if (res.error) {
-        throw new Error(res.error.message);
+      let query = supabase.from('players').select('*');
+      if (leagueId) {
+        query = query.eq('league_id', leagueId);
       }
+      const res = await query;
+      if (res.error) throw new Error(res.error.message);
       return res.data || [];
     },
   });
@@ -100,24 +103,16 @@ function PlayersPage() {
         </button>
       </div>
 
-      {/* Box di debug se c'è un errore o se la tabella è vuota */}
       {error && (
         <div className="p-3 rounded-lg bg-red-950/70 border border-red-700 text-red-200 text-xs">
-          <strong>Errore Supabase:</strong> {(error as any).message}
+          <strong>Errore:</strong> {(error as any).message}
         </div>
       )}
 
       {playersList.length === 0 ? (
         <div className="bg-[#151b28] border border-[#222c42] rounded-xl p-8 text-center space-y-3">
           <p className="font-bebas text-xl text-slate-300">NESSUNA CARTA TROVATA</p>
-          <p className="text-xs text-slate-400 leading-relaxed">
-            La tabella <code>players</code> su Supabase è attualmente vuota o bloccata dai permessi RLS.
-          </p>
-          <div className="pt-2">
-            <span className="text-[11px] text-amber-400 bg-amber-950/40 px-3 py-1.5 rounded-lg border border-amber-800">
-              Controlla se in Admin il giocatore compare nella lista "ROSA GIOCATORI"
-            </span>
-          </div>
+          <p className="text-xs text-slate-400">Nessun giocatore registrato in questa lega.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -125,10 +120,10 @@ function PlayersPage() {
             const isGk = p.position === 'Portiere';
             const roleCode = getRoleCode(p.position);
 
-            const cardInput: PlayerInput = {
+            const cardInput: any = {
               id: p.id,
               nickname: p.name || 'Giocatore',
-              role: roleCode as any,
+              role: roleCode,
               isEligible: true,
               isGuest: Boolean(p.is_dummy),
               matchesPlayed: 0,
@@ -138,20 +133,22 @@ function PlayersPage() {
               mvpCount: 0,
               consecutiveAbsences: 0,
               currentFormModifier: 0,
+              teamworkTendency: p.teamwork || 'Alto',
+              gkEfficiency: isGk ? 'Alta' : (p.position === 'Difensore' ? 'Media' : 'Bassa'),
               attributes: isGk ? {
                 rif: 75,
                 pos: 72,
                 agg: 68,
                 pas: 65,
                 usc: 70,
-                com: 74,
+                pre: 74,
               } : {
-                pac: 75,
-                sho: p.position === 'Attaccante' ? 82 : 68,
+                vel: 75,
+                tir: p.position === 'Attaccante' ? 82 : 68,
                 pas: 72,
                 dri: 75,
-                def: p.position === 'Difensore' ? 80 : 65,
-                phy: 74,
+                dif: p.position === 'Difensore' ? 80 : 65,
+                fis: 74,
               },
             };
 
