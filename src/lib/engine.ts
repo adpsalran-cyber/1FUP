@@ -278,3 +278,49 @@ export function calculateDynamicOverall(player: any): number {
   const formBonus = (player.current_form ?? 0);
   return Math.max(40, Math.min(99, baseOvr + formBonus));
 }
+export interface TeamParticipant {
+  id: string | null;
+  name: string;
+  role: string;
+  overall: number;
+  isGuest: boolean;
+}
+
+export interface BalancedTeamsResult {
+  teamA: TeamParticipant[];
+  teamB: TeamParticipant[];
+  avgA: number;
+  avgB: number;
+}
+
+/**
+ * Algoritmo modulare di bilanciamento squadre.
+ * Modificabile in futuro per intesa ruoli, portieri e storico.
+ */
+export function balanceTeams(participants: TeamParticipant[]): BalancedTeamsResult {
+  const sorted = [...participants].sort((a, b) => b.overall - a.overall);
+
+  const teamA: TeamParticipant[] = [];
+  const teamB: TeamParticipant[] = [];
+
+  // Distribuzione a serpente (Snake Draft: 1, 4, 5, 8, 9 vs 2, 3, 6, 7, 10)
+  const snakePattern = [0, 1, 1, 0, 0, 1, 1, 0, 0, 1];
+
+  sorted.forEach((p, idx) => {
+    if (snakePattern[idx] === 0) {
+      teamA.push(p);
+    } else {
+      teamB.push(p);
+    }
+  });
+
+  const sumA = teamA.reduce((acc, p) => acc + (p.overall || 65), 0);
+  const sumB = teamB.reduce((acc, p) => acc + (p.overall || 65), 0);
+
+  return {
+    teamA,
+    teamB,
+    avgA: teamA.length ? Math.round((sumA / teamA.length) * 10) / 10 : 0,
+    avgB: teamB.length ? Math.round((sumB / teamB.length) * 10) / 10 : 0,
+  };
+}
