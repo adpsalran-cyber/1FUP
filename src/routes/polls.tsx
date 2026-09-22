@@ -143,7 +143,27 @@ function PollsPage() {
     });
     return top;
   }, [votes, availableSlots]);
-      // Controlla se il giocatore ha già un voto registrato per questo sondaggio
+
+  // Mutazione: Voto per il giocatore
+  const voteMutation = useMutation({
+    mutationFn: async () => {
+      if (!poll?.id || !targetPlayerId) {
+        throw new Error('Seleziona il calciatore per cui votare.');
+      }
+      if (selectedSlots.length === 0) {
+        throw new Error('Seleziona almeno un orario disponibile.');
+      }
+
+      const currentVotes = votes || [];
+      const isAlreadyConfirmed = currentVotes.some(
+        (v: any) => v.player_id === targetPlayerId && v.is_confirmed
+      );
+      const isConfirmed =
+        isAlreadyConfirmed || currentVotes.filter((v: any) => v.is_confirmed).length < 10;
+      const queuePosition = isConfirmed
+        ? null
+        : currentVotes.filter((v: any) => !v.is_confirmed).length + 1;
+
       const existingVote = votes?.find((v: any) => v.player_id === targetPlayerId);
 
       let error;
@@ -171,29 +191,6 @@ function PollsPage() {
           });
         error = res.error;
       }
-
-  // Mutazione: Voto per il giocatore
-  const voteMutation = useMutation({
-    mutationFn: async () => {
-      if (!poll?.id || !targetPlayerId) {
-        throw new Error('Seleziona il calciatore per cui votare.');
-      }
-      if (selectedSlots.length === 0) {
-        throw new Error('Seleziona almeno un orario disponibile.');
-      }
-
-      const currentVotes = votes || [];
-      const isAlreadyConfirmed = currentVotes.some(
-        (v: any) => v.player_id === targetPlayerId && v.is_confirmed
-      );
-      const isConfirmed =
-        isAlreadyConfirmed || currentVotes.filter((v: any) => v.is_confirmed).length < 10;
-      const queuePosition = isConfirmed
-        ? null
-        : currentVotes.filter((v: any) => !v.is_confirmed).length + 1;
-
-      const { error } = await supabase.from('poll_votes').upsert(
-
 
       if (error) throw new Error(error.message);
     },
@@ -425,7 +422,7 @@ function PollsPage() {
         </div>
       </div>
 
-      {/* AZIONI SPECIALI GUEST (Solo Admin o per chiudere a 10) */}
+      {/* AZIONI SPECIALI GUEST */}
       <div className="bg-[#111722] p-3 rounded-xl border border-[#222c42] flex flex-col sm:flex-row items-center justify-between gap-2">
         <div>
           <span className="font-bebas text-base text-slate-200 block">GESTIONE GUEST VOLANTI</span>
