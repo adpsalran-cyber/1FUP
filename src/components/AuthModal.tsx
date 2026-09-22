@@ -1,5 +1,9 @@
 import React, { useState } from 'react';
-import { supabase } from '../lib/engine';
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 interface AuthModalProps {
   onSuccess: () => void;
@@ -35,7 +39,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
       }
       onSuccess();
     } catch (err: any) {
-      setError(err.message || 'Errore durante l\'autenticazione');
+      setError(err.message || "Errore durante l'autenticazione");
     } finally {
       setLoading(false);
     }
