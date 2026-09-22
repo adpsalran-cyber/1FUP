@@ -40,6 +40,18 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const fetchDummies = async (leagueId: string) => {
+    const { data: dummies } = await supabase
+      .from('players')
+      .select('id, name, number, archetype, position')
+      .eq('league_id', leagueId)
+      .eq('is_dummy', true);
+
+    if (dummies && dummies.length > 0) {
+      setDummyPlayers(dummies);
+    }
+  };
+
   // Gestione creazione o join lega
   const handleLeagueSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,19 +93,7 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
         });
 
         setCurrentLeagueId(league.id);
-
-        // Carica eventuali dummy players presenti in questa lega
-        const { data: dummies } = await supabase
-          .from('players')
-          .select('id, name, archetype, position')
-          .eq('league_id', league.id)
-          .eq('is_dummy', true)
-          .is('user_id', null);
-
-        if (dummies && dummies.length > 0) {
-          setDummyPlayers(dummies);
-        }
-
+        await fetchDummies(league.id);
         setStep('profile');
       }
     } catch (err: any) {
@@ -112,10 +112,11 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
 
     try {
       if (profileMode === 'claim' && selectedDummyId) {
-        const { error: claimErr } = await supabase
-          .from('players')
-          .update({ user_id: userId, is_dummy: false })
-          .eq('id', selectedDummyId);
+        // Usa la funzione SQL sicura claim_player
+        const { error: claimErr } = await supabase.rpc('claim_player', {
+          p_player_id: selectedDummyId,
+          p_user_id: userId,
+        });
 
         if (claimErr) throw claimErr;
       } else {
@@ -247,7 +248,7 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
                     profileMode === 'claim' ? 'bg-amber-400 text-slate-950 shadow' : 'text-slate-400'
                   }`}
                 >
-                  Collega Esistente
+                  Collega Esistente ({dummyPlayers.length})
                 </button>
               </div>
             )}
@@ -270,10 +271,10 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
                     onChange={(e) => setSelectedDummyId(e.target.value)}
                     className="w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm text-slate-100 focus:border-amber-400 focus:outline-none"
                   >
-                    <option value="">-- Scegli giocatore registrato dall'Admin --</option>
+                    <option value="">-- Scegli giocatore pre-caricato dall'Admin --</option>
                     {dummyPlayers.map((dp) => (
                       <option key={dp.id} value={dp.id}>
-                        {dp.name} ({dp.position} - {dp.archetype})
+                        #{dp.number || '10'} {dp.name} ({dp.position} - {dp.archetype})
                       </option>
                     ))}
                   </select>
