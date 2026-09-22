@@ -56,12 +56,13 @@ function AdminPage() {
   const [editTeamwork, setEditTeamwork] = useState<string>('Medio');
   const [editGkEfficiency, setEditGkEfficiency] = useState<string>('Media');
 
-  // --- STATI SONDAGGIO (Data + fino a 6 slot orari) ---
+  // --- STATI SONDAGGIO (Data + fino a 6 slot orari + auto-creazione) ---
   const [targetDate, setTargetDate] = useState('');
   const [pollTitle, setPollTitle] = useState('Partita di Calcetto');
   const [timeSlots, setTimeSlots] = useState<string[]>([
     '19:30', '20:00', '20:30', '21:00', '21:30', '22:00'
   ]);
+  const [autoCreateMatch, setAutoCreateMatch] = useState(false);
 
   const handleTimeSlotChange = (index: number, value: string) => {
     const updated = [...timeSlots];
@@ -219,7 +220,7 @@ function AdminPage() {
     onError: (err: any) => alert(`Errore eliminazione: ${err.message}`),
   });
 
-  // 6. Sondaggio Partita (con supporto fino a 6 slot orari)
+  // 6. Sondaggio Partita (con supporto fino a 6 slot orari + auto-creazione partita)
   const createPollMutation = useMutation({
     mutationFn: async () => {
       if (!targetDate) throw new Error('Seleziona una data per la partita');
@@ -240,6 +241,7 @@ function AdminPage() {
           title: pollTitle.trim(),
           target_date: targetDate,
           time_slots: validSlots,
+          auto_create_match: autoCreateMatch,
           is_closed: false,
         })
         .select();
@@ -251,6 +253,7 @@ function AdminPage() {
       alert('Sondaggio creato con successo!');
       queryClient.invalidateQueries({ queryKey: queryKeys.polls(activeLeagueId) });
       setTargetDate('');
+      setAutoCreateMatch(false);
     },
     onError: (err: any) => {
       alert(`Errore creazione sondaggio: ${err.message}`);
@@ -593,7 +596,7 @@ function AdminPage() {
         </div>
       )}
 
-      {/* SEZIONE 3: SONDAGGIO PARTITA CON ORARI */}
+      {/* SEZIONE 3: SONDAGGIO PARTITA CON ORARI + AUTO-CREAZIONE */}
       <div className="bg-[#151b28] p-4 rounded-xl border border-[#222c42] space-y-3">
         <h2 className="font-bebas text-xl text-lime-400">NUOVO SONDAGGIO PARTITA</h2>
         
@@ -646,6 +649,24 @@ function AdminPage() {
               </div>
             ))}
           </div>
+        </div>
+
+        {/* SWITCH: CREA PARTITA IN AUTOMATICO A 10 VOTI */}
+        <div className="flex items-center justify-between p-3 bg-[#0b0e14] border border-[#222c42] rounded-xl my-2">
+          <div>
+            <span className="text-xs font-semibold text-slate-200 block">
+              Crea partita automatica a 10 voti
+            </span>
+            <span className="text-[10px] text-slate-400">
+              Genera e bilancia l'evento appena si raggiungono 10 confermati
+            </span>
+          </div>
+          <input
+            type="checkbox"
+            checked={autoCreateMatch}
+            onChange={(e) => setAutoCreateMatch(e.target.checked)}
+            className="w-4 h-4 accent-lime-400 cursor-pointer"
+          />
         </div>
 
         <button
