@@ -19,7 +19,11 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [leagueId, setLeagueId] = useState<string | null>(localStorage.getItem('alci_league_id'));
+  const [leagueId, setLeagueId] = useState<string | null>(
+    typeof window !== 'undefined'
+      ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
+      : null
+  );
   const [leagueName, setLeagueName] = useState<string>('');
   const [needsProfile, setNeedsProfile] = useState(false);
 
@@ -44,6 +48,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       const lid = membership.league_id;
       setLeagueId(lid);
       localStorage.setItem('alci_league_id', lid);
+      localStorage.setItem('active_league_id', lid);
       const lName = (membership.leagues as any)?.name || 'La Mia Lega';
       setLeagueName(lName);
 
@@ -83,6 +88,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     localStorage.removeItem('alci_league_id');
+    localStorage.removeItem('active_league_id');
     setSession(null);
     setLeagueId(null);
     setNeedsProfile(false);
@@ -138,6 +144,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           userId={session.id}
           onLeagueSelected={(lid) => {
             localStorage.setItem('alci_league_id', lid);
+            localStorage.setItem('active_league_id', lid);
             setLeagueId(lid);
             setNeedsProfile(false);
             supabase.auth.getUser().then(({ data: { user } }) => checkUserStatus(user));
@@ -181,8 +188,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               currentPath === '/players' ? 'text-amber-400' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <span className="text-lg">👤</span>
-            Rosa
+            <span className="text-lg">🎴</span>
+            Players
           </Link>
           <Link
             to="/admin"
