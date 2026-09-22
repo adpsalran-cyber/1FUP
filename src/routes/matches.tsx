@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
 import { createRoute } from '@tanstack/react-router';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Route as rootRoute } from './__root';
 import { supabase } from '../lib/actions';
 
-function MatchesPage() {
-  const queryClient = useQueryClient();
+export function MatchesPage() {
   const [activeTab, setActiveTab] = useState<'giocate' | 'programmate' | 'storico'>('giocate');
   const [selectedMatch, setSelectedMatch] = useState<any | null>(null);
 
@@ -13,7 +12,6 @@ function MatchesPage() {
     ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
     : null;
 
-  // Caricamento partite
   const { data: matches, isLoading } = useQuery({
     queryKey: ['league_matches', leagueId],
     queryFn: async () => {
@@ -44,16 +42,14 @@ function MatchesPage() {
 
   const matchesList = matches || [];
 
-  // Filtro per Tab
   const filteredMatches = matchesList.filter((m: any) => {
     if (activeTab === 'giocate') return m.status === 'completed';
     if (activeTab === 'programmate') return m.status === 'scheduled';
-    return true; // Storico
+    return true;
   });
 
   return (
     <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
-      {/* Header */}
       <div className="border-b border-[#222c42] pb-3 flex justify-between items-center">
         <div>
           <h1 className="font-bebas text-3xl text-slate-100">PARTITE</h1>
@@ -61,7 +57,6 @@ function MatchesPage() {
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="flex rounded-xl bg-slate-900/90 p-1 border border-slate-800 text-xs font-semibold">
         <button
           onClick={() => setActiveTab('giocate')}
@@ -89,7 +84,6 @@ function MatchesPage() {
         </button>
       </div>
 
-      {/* Lista Partite */}
       {isLoading ? (
         <div className="p-8 text-center text-amber-400 font-bebas text-lg animate-pulse">
           CARICAMENTO PARTITE...
@@ -133,7 +127,6 @@ function MatchesPage() {
                   </span>
                 </div>
 
-                {/* Tabellino Risultato */}
                 <div className="flex items-center justify-between px-2 py-1">
                   <span className="font-bebas text-lg text-slate-200">SQUADRA A</span>
                   <div className="flex items-center gap-2 bg-[#0b0e14] px-3 py-1 rounded-lg border border-[#222c42]">
@@ -159,7 +152,6 @@ function MatchesPage() {
         </div>
       )}
 
-      {/* Modale Dettaglio Partita */}
       {selectedMatch && (
         <div
           className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 z-50"
@@ -224,5 +216,3 @@ export const Route = createRoute({
   path: '/matches',
   component: MatchesPage,
 });
-
-export const MatchesRoute = Route;
