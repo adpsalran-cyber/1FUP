@@ -36,21 +36,35 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
     setSession(user);
 
-    // Verifica se l'utente appartiene a una lega
-    const { data: membership } = await supabase
+    // Controlla se abbiamo già una lega memorizzata in sessione locale
+    const storedLeagueId = localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id');
+
+    let membershipQuery = supabase
       .from('league_members')
       .select('league_id, role, leagues(name, invite_code)')
-      .eq('user_id', user.id)
-      .limit(1)
-      .maybeSingle();
+      .eq('user_id', user.id);
+
+    if (storedLeagueId) {
+      membershipQuery = membershipQuery.eq('league_id', storedLeagueId);
+    }
+
+    const { data: membership } = await membershipQuery.limit(1).maybeSingle();
 
     if (membership && membership.league_id) {
       const lid = membership.league_id;
       setLeagueId(lid);
       localStorage.setItem('alci_league_id', lid);
       localStorage.setItem('active_league_id', lid);
+      localStorage.setItem('alci_user_role', membership.role || 'member');
       const lName = (membership.leagues as any)?.name || 'La Mia Lega';
       setLeagueName(lName);
+
+      // Se è admin, non bloccare mai l'accesso
+      if (membership.role === 'admin') {
+        setNeedsProfile(false);
+        setLoading(false);
+        return;
+      }
 
       // Verifica se ha già un profilo giocatore in questa lega
       const { data: player } = await supabase
@@ -60,14 +74,26 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         .eq('user_id', user.id)
         .maybeSingle();
 
-      if (!player) {
-        setNeedsProfile(true);
-      } else {
-        setNeedsProfile(false);
-      }
+      setNeedsProfile(!player);
     } else {
-      setLeagueId(null);
-      setNeedsProfile(true);
+      // Se non trova membership con quell'ID, cerca la prima disponibile
+      const { data: anyMembership } = await supabase
+        .from('league_members')
+        .select('league_id, role, leagues(name, invite_code)')
+        .eq('user_id', user.id)
+        .limit(1)
+        .maybeSingle();
+
+      if (anyMembership?.league_id) {
+        setLeagueId(anyMembership.league_id);
+        localStorage.setItem('alci_league_id', anyMembership.league_id);
+        localStorage.setItem('active_league_id', anyMembership.league_id);
+        setLeagueName((anyMembership.leagues as any)?.name || 'La Mia Lega');
+        setNeedsProfile(false);
+      } else {
+        setLeagueId(null);
+        setNeedsProfile(true);
+      }
     }
 
     setLoading(false);
@@ -89,6 +115,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     await supabase.auth.signOut();
     localStorage.removeItem('alci_league_id');
     localStorage.removeItem('active_league_id');
+    localStorage.removeItem('alci_user_role');
     setSession(null);
     setLeagueId(null);
     setNeedsProfile(false);
@@ -138,16 +165,16 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         />
       )}
 
-      {/* League & Profile Modal se loggato ma senza lega o profilo configurato */}
+      {/* League & Profile Modal se loggato ma senza lega o profilo obbligatorio */}
       {session && (!leagueId || needsProfile) && (
         <LeagueModal
           userId={session.id}
-          onLeagueSelected={(lid) => {
+          onLeagueSelected={(lid, role) => {
             localStorage.setItem('alci_league_id', lid);
             localStorage.setItem('active_league_id', lid);
+            localStorage.setItem('alci_user_role', role);
             setLeagueId(lid);
             setNeedsProfile(false);
-            supabase.auth.getUser().then(({ data: { user } }) => checkUserStatus(user));
           }}
         />
       )}
@@ -158,7 +185,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           <Link
             to="/"
             className={`flex flex-col items-center gap-1 text-[11px] font-medium tracking-wide uppercase transition ${
-              currentPath === '/' ? 'text-amber-400' : 'text-slate-400 hover:text-slate-200'
+              currentPath === '/' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <span className="text-lg">⚽</span>
@@ -167,7 +194,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           <Link
             to="/matches"
             className={`flex flex-col items-center gap-1 text-[11px] font-medium tracking-wide uppercase transition ${
-              currentPath === '/matches' ? 'text-amber-400' : 'text-slate-400 hover:text-slate-200'
+              currentPath === '/matches' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <span className="text-lg">⚔️</span>
@@ -176,7 +203,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           <Link
             to="/standings"
             className={`flex flex-col items-center gap-1 text-[11px] font-medium tracking-wide uppercase transition ${
-              currentPath === '/standings' ? 'text-amber-400' : 'text-slate-400 hover:text-slate-200'
+              currentPath === '/standings' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <span className="text-lg">🏆</span>
@@ -185,7 +212,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           <Link
             to="/players"
             className={`flex flex-col items-center gap-1 text-[11px] font-medium tracking-wide uppercase transition ${
-              currentPath === '/players' ? 'text-amber-400' : 'text-slate-400 hover:text-slate-200'
+              currentPath === '/players' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <span className="text-lg">🎴</span>
@@ -194,7 +221,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           <Link
             to="/admin"
             className={`flex flex-col items-center gap-1 text-[11px] font-medium tracking-wide uppercase transition ${
-              currentPath === '/admin' ? 'text-amber-400' : 'text-slate-400 hover:text-slate-200'
+              currentPath === '/admin' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <span className="text-lg">⚙️</span>
