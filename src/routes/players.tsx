@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Route as rootRoute } from './__root';
 import { supabase } from '../lib/actions';
 import { PlayerCard } from '../components/PlayerCard';
-import { PlayerInput } from '../lib/engine';
+import { ARCHETYPES, MainRole, generateAttributesFromOverall, calculateArchetypeOverall } from '../lib/engine';
 
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
@@ -34,7 +34,7 @@ function PlayersPage() {
       if (leagueId) {
         query = query.eq('league_id', leagueId);
       }
-      const res = await query;
+      const res = await query.order('name');
       if (res.error) throw new Error(res.error.message);
       return res.data || [];
     },
@@ -61,21 +61,12 @@ function PlayersPage() {
       alert('Profilo collegato con successo!');
       setSelectedPlayer(null);
       refetch();
+      queryClient.invalidateQueries({ queryKey: ['players_all'] });
     },
     onError: (err: any) => {
       alert(`Errore claim: ${err.message}`);
     },
   });
-
-  const getRoleCode = (pos: string) => {
-    switch (pos) {
-      case 'Portiere': return 'POR';
-      case 'Difensore': return 'DIF';
-      case 'Centrocampista': return 'CEN';
-      case 'Attaccante': return 'ATT';
-      default: return 'UNI';
-    }
-  };
 
   if (isLoading) {
     return (
@@ -88,7 +79,7 @@ function PlayersPage() {
   const playersList = data || [];
 
   return (
-    <div className="p-4 space-y-4 pb-24">
+    <div className="p-4 space-y-4 pb-24 max-w-2xl mx-auto">
       {/* Header */}
       <div className="border-b border-[#222c42] pb-3 flex justify-between items-end">
         <div>
@@ -97,7 +88,7 @@ function PlayersPage() {
         </div>
         <button
           onClick={() => refetch()}
-          className="font-bebas text-amber-400 text-sm bg-[#151b28] px-3 py-1 rounded-lg border border-[#222c42]"
+          className="font-bebas text-amber-400 text-sm bg-[#151b28] px-3 py-1 rounded-lg border border-[#222c42] hover:border-amber-400 transition"
         >
           AGGIORNA ({playersList.length})
         </button>
@@ -117,45 +108,42 @@ function PlayersPage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {playersList.map((p: any) => {
-            const isGk = p.position === 'Portiere';
-            const roleCode = getRoleCode(p.position);
+            const archKey = p.archetype || 'ATT_BOMBER';
+            const archDef = ARCHETYPES[archKey];
+            const roleCode: MainRole = (p.role as MainRole) || archDef?.role || 'ATT';
+            const isGk = roleCode === 'POR';
+
+            // Recupera gli attributi salvati, o fallback generati partendo dall'overall
+            const playerAttrs = p.attributes && Object.keys(p.attributes).length > 0
+              ? p.attributes
+              : generateAttributesFromOverall(archKey, p.overall || 70);
+
+            const calculatedOvr = p.overall ?? calculateArchetypeOverall(archKey, playerAttrs);
 
             const cardInput: any = {
               id: p.id,
               nickname: p.name || 'Giocatore',
               role: roleCode,
+              archetype: archKey,
+              overall: calculatedOvr,
               isEligible: true,
               isGuest: Boolean(p.is_dummy),
-              matchesPlayed: 0,
-              wins: 0,
-              draws: 0,
-              losses: 0,
-              mvpCount: 0,
+              matchesPlayed: p.matches_played || 0,
+              wins: p.wins || 0,
+              draws: p.draws || 0,
+              losses: p.losses || 0,
+              mvpCount: p.mvp_count || 0,
               consecutiveAbsences: 0,
               currentFormModifier: 0,
-              teamworkTendency: p.teamwork || 'Alto',
-              gkEfficiency: isGk ? 'Alta' : (p.position === 'Difensore' ? 'Media' : 'Bassa'),
-              attributes: isGk ? {
-                rif: 75,
-                pos: 72,
-                agg: 68,
-                pas: 65,
-                usc: 70,
-                pre: 74,
-              } : {
-                vel: 75,
-                tir: p.position === 'Attaccante' ? 82 : 68,
-                pas: 72,
-                dri: 75,
-                dif: p.position === 'Difensore' ? 80 : 65,
-                fis: 74,
-              },
+              teamworkTendency: p.teamwork || 'Medio',
+              gkEfficiency: p.gk_efficiency || (isGk ? 'Alta' : 'Media'),
+              attributes: playerAttrs,
             };
 
             return (
               <div
                 key={p.id}
-                onClick={() => setSelectedPlayer(p)}
+                onClick={() => setSelectedPlayer({ ...p, cardData: cardInput })}
                 className="cursor-pointer transition-transform active:scale-95"
               >
                 <PlayerCard player={cardInput} />
@@ -165,7 +153,7 @@ function PlayersPage() {
         </div>
       )}
 
-      {/* Modal Dettagli / Claim */}
+      {/* Modal Dettagli / Claim (SENZA NUMERO DI MAGLIA) */}
       {selectedPlayer && (
         <div 
           className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 z-50"
@@ -177,9 +165,15 @@ function PlayersPage() {
           >
             <div className="flex justify-between items-start border-b border-[#222c42] pb-3">
               <div>
-                <span className="text-xs font-bold text-amber-400 tracking-wider uppercase">
-                  #{selectedPlayer.number || 10} • {selectedPlayer.position || 'Giocatore'}
-                </span>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-bold text-amber-400 tracking-wider uppercase">
+                    {selectedPlayer.cardData?.role || selectedPlayer.role || 'ATT'}
+                  </span>
+                  <span className="text-slate-500">•</span>
+                  <span className="text-xs text-slate-300 font-semibold">
+                    {ARCHETYPES[selectedPlayer.archetype]?.name || selectedPlayer.archetype || 'Archetipo'}
+                  </span>
+                </div>
                 <h3 className="font-bebas text-3xl text-slate-100 leading-tight">
                   {selectedPlayer.name}
                 </h3>
@@ -199,12 +193,24 @@ function PlayersPage() {
 
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="bg-[#0b0e14] border border-[#222c42] p-2.5 rounded-lg">
-                <span className="text-slate-500 uppercase text-[10px] block">Piede</span>
-                <span className="text-slate-200 font-semibold">{selectedPlayer.preferred_foot || 'Destro'}</span>
+                <span className="text-slate-500 uppercase text-[10px] block">Overall Effettivo</span>
+                <span className="text-amber-400 font-bebas text-xl">
+                  {selectedPlayer.cardData?.overall || selectedPlayer.overall || 70}
+                </span>
               </div>
               <div className="bg-[#0b0e14] border border-[#222c42] p-2.5 rounded-lg">
-                <span className="text-slate-500 uppercase text-[10px] block">Archetipo</span>
-                <span className="text-slate-200 font-semibold">{selectedPlayer.archetype || 'Universale'}</span>
+                <span className="text-slate-500 uppercase text-[10px] block">Piede Preferito</span>
+                <span className="text-slate-200 font-semibold mt-1 block">
+                  {selectedPlayer.preferred_foot || 'Destro'}
+                </span>
+              </div>
+              <div className="bg-[#0b0e14] border border-[#222c42] p-2.5 rounded-lg">
+                <span className="text-slate-500 uppercase text-[10px] block">Gioco di Squadra</span>
+                <span className="text-slate-200 font-semibold">{selectedPlayer.teamwork || 'Medio'}</span>
+              </div>
+              <div className="bg-[#0b0e14] border border-[#222c42] p-2.5 rounded-lg">
+                <span className="text-slate-500 uppercase text-[10px] block">Efficacia Portiere</span>
+                <span className="text-slate-200 font-semibold">{selectedPlayer.gk_efficiency || 'Media'}</span>
               </div>
             </div>
 
@@ -216,7 +222,7 @@ function PlayersPage() {
                 <button
                   disabled={claimMutation.isPending}
                   onClick={() => claimMutation.mutate(selectedPlayer.id)}
-                  className="w-full py-2.5 bg-amber-400 hover:bg-amber-300 text-black font-bebas text-lg rounded-xl tracking-wider shadow-lg transition disabled:opacity-50"
+                  className="w-full py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bebas text-lg rounded-xl tracking-wider shadow-lg transition disabled:opacity-50 font-bold"
                 >
                   {claimMutation.isPending ? 'COLLEGAMENTO...' : 'COLLEGA AL MIO ACCOUNT'}
                 </button>
