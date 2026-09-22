@@ -1,16 +1,15 @@
-export type PlayerRole = 'ATT' | 'EST' | 'UNI' | 'DIF' | 'POR';
-export type FormStatus = 'UP' | 'STABLE' | 'DOWN';
+export type MainRole = 'ATT' | 'DIF' | 'EST' | 'UNI' | 'POR';
 
-export interface PlayerAttributesMovement {
-  pac: number;
-  sho: number;
-  pas: number;
+export interface FieldAttributes {
+  vel: number;
   dri: number;
-  def: number;
-  phy: number;
+  tir: number;
+  pas: number;
+  fis: number;
+  dif: number;
 }
 
-export interface PlayerAttributesGK {
+export interface GkAttributes {
   rif: number;
   pos: number;
   agg: number;
@@ -19,175 +18,217 @@ export interface PlayerAttributesGK {
   com: number;
 }
 
-export interface PlayerInput {
+export type PlayerAttributes = FieldAttributes | GkAttributes | any;
+
+export interface ArchetypeDef {
   id: string;
-  nickname: string;
-  role: PlayerRole;
-  isEligible: boolean;
-  isGuest: boolean;
-  matchesPlayed: number;
-  wins: number;
-  draws: number;
-  losses: number;
-  mvpCount: number;
-  consecutiveAbsences: number;
-  currentFormModifier: number;
-  attributes: PlayerAttributesMovement | PlayerAttributesGK;
+  name: string;
+  role: MainRole;
+  description: string;
+  weights: Record<string, number>;
+  weightsSummary: string;
 }
 
-export interface OfficialStandingRow {
-  position: number;
-  playerId: string;
-  nickname: string;
-  role: PlayerRole;
-  matchesPlayed: number;
-  wins: number;
-  draws: number;
-  losses: number;
-  mvpCount: number;
-  basePoints: number;
-  participationBonus: number;
-  absenceMalus: number;
-  realPoints: number;
-  pointsPerMatch: number;
+export const ARCHETYPES: Record<string, ArchetypeDef> = {
+  // ATTACCANTI
+  ATT_BOMBER: {
+    id: 'ATT_BOMBER',
+    name: 'Bomber',
+    role: 'ATT',
+    description: 'Letale negli ultimi metri, tiro immediato e istinto del gol.',
+    weights: { tir: 0.35, fis: 0.20, vel: 0.15, pas: 0.10, dif: 0.10, dri: 0.10 },
+    weightsSummary: 'TIR 35% • FIS 20% • VEL 15%',
+  },
+  ATT_FANTASISTA: {
+    id: 'ATT_FANTASISTA',
+    name: 'Fantasista',
+    role: 'ATT',
+    description: 'Visione di gioco sopraffina, assist illuminanti e controllo nello stretto.',
+    weights: { dri: 0.25, pas: 0.25, tir: 0.20, vel: 0.15, dif: 0.10, fis: 0.05 },
+    weightsSummary: 'DRI 25% • PAS 25% • TIR 20%',
+  },
+  ATT_BOA: {
+    id: 'ATT_BOA',
+    name: 'Boa',
+    role: 'ATT',
+    description: 'Difesa palla col corpo, fa salire la squadra e si gira di potenza.',
+    weights: { fis: 0.40, tir: 0.30, pas: 0.10, dif: 0.10, vel: 0.05, dri: 0.05 },
+    weightsSummary: 'FIS 40% • TIR 30% • DIF 10%',
+  },
+  ATT_VIRTUOSO: {
+    id: 'ATT_VIRTUOSO',
+    name: 'Virtuoso',
+    role: 'ATT',
+    description: 'Dribbling costante, giocate di suola e superiorità numerica.',
+    weights: { dri: 0.35, tir: 0.20, vel: 0.15, pas: 0.15, dif: 0.10, fis: 0.05 },
+    weightsSummary: 'DRI 35% • TIR 20% • VEL 15%',
+  },
+
+  // ESTERNI
+  EST_FRECCIA: {
+    id: 'EST_FRECCIA',
+    name: 'Freccia',
+    role: 'EST',
+    description: 'Allunghi in campo aperto e ripartenze micidiali palla al piede.',
+    weights: { vel: 0.35, dri: 0.20, tir: 0.15, pas: 0.10, fis: 0.10, dif: 0.10 },
+    weightsSummary: 'VEL 35% • DRI 20% • TIR 15%',
+  },
+  EST_INCURSORE: {
+    id: 'EST_INCURSORE',
+    name: 'Incursore',
+    role: 'EST',
+    description: 'Tagli profondi senza palla e inserimenti puntuali sul secondo palo.',
+    weights: { tir: 0.25, vel: 0.20, fis: 0.15, dif: 0.15, dri: 0.15, pas: 0.10 },
+    weightsSummary: 'TIR 25% • VEL 20% • FIS 15%',
+  },
+  EST_FINALIZZATORE: {
+    id: 'EST_FINALIZZATORE',
+    name: 'Finalizzatore',
+    role: 'EST',
+    description: 'Converge al centro dalla fascia per scaricare conclusioni potenti.',
+    weights: { tir: 0.30, vel: 0.25, fis: 0.15, dri: 0.15, dif: 0.10, pas: 0.05 },
+    weightsSummary: 'TIR 30% • VEL 25% • FIS 15%',
+  },
+
+  // UNIVERSALI
+  UNI_JOLLY: {
+    id: 'UNI_JOLLY',
+    name: 'Jolly',
+    role: 'UNI',
+    description: 'Completo ed essenziale: copre ogni zona senza punti deboli.',
+    weights: { vel: 0.17, dri: 0.17, pas: 0.17, dif: 0.17, tir: 0.16, fis: 0.16 },
+    weightsSummary: 'Bilanciato 16-17%',
+  },
+  UNI_ONNIPRESENTE: {
+    id: 'UNI_ONNIPRESENTE',
+    name: 'Onnipresente',
+    role: 'UNI',
+    description: 'Resistenza inesauribile, pressing asfissiante e transizioni continue.',
+    weights: { vel: 0.20, fis: 0.20, dif: 0.20, tir: 0.15, pas: 0.15, dri: 0.10 },
+    weightsSummary: 'VEL 20% • FIS 20% • DIF 20%',
+  },
+  UNI_REGISTA: {
+    id: 'UNI_REGISTA',
+    name: 'Regista',
+    role: 'UNI',
+    description: 'Metronomo: pulizia nei passaggi e gestione lucida del possesso.',
+    weights: { pas: 0.35, dif: 0.20, dri: 0.15, vel: 0.10, tir: 0.10, fis: 0.10 },
+    weightsSummary: 'PAS 35% • DIF 20% • DRI 15%',
+  },
+
+  // DIFENSORI
+  DIF_MURO: {
+    id: 'DIF_MURO',
+    name: 'Muro',
+    role: 'DIF',
+    description: 'Contrasti duri, respinta fisica sui tiri e marcatura implacabile.',
+    weights: { dif: 0.40, fis: 0.35, pas: 0.10, vel: 0.05, dri: 0.05, tir: 0.05 },
+    weightsSummary: 'DIF 40% • FIS 35% • PAS 10%',
+  },
+  DIF_TECNICO: {
+    id: 'DIF_TECNICO',
+    name: 'Tecnico',
+    role: 'DIF',
+    description: 'Recupero palla pulito e costruzione lucida della manovra dal basso.',
+    weights: { pas: 0.25, dif: 0.25, dri: 0.15, fis: 0.15, vel: 0.10, tir: 0.10 },
+    weightsSummary: 'PAS 25% • DIF 25% • FIS 15%',
+  },
+  DIF_LIBERO: {
+    id: 'DIF_LIBERO',
+    name: 'Libero',
+    role: 'DIF',
+    description: 'Lettura anticipata delle traiettorie, diagonali e chiusure sicure.',
+    weights: { dif: 0.35, pas: 0.20, vel: 0.15, fis: 0.15, dri: 0.10, tir: 0.05 },
+    weightsSummary: 'DIF 35% • PAS 20% • FIS 15%',
+  },
+  DIF_SUPPORTO: {
+    id: 'DIF_SUPPORTO',
+    name: 'Supporto',
+    role: 'DIF',
+    description: 'Solido dietro e sempre pronto ad accompagnare l’azione per lo scarico.',
+    weights: { pas: 0.25, dif: 0.25, vel: 0.15, dri: 0.15, fis: 0.10, tir: 0.10 },
+    weightsSummary: 'PAS 25% • DIF 25% • VEL 15%',
+  },
+
+  // PORTIERI
+  POR_MURO: {
+    id: 'POR_MURO',
+    name: 'Muro',
+    role: 'POR',
+    description: 'Parate d’istinto, riflessi ravvicinati e piazzamento impeccabile.',
+    weights: { rif: 0.35, pos: 0.25, com: 0.15, agg: 0.10, usc: 0.10, pas: 0.05 },
+    weightsSummary: 'RIF 35% • POS 25% • COM 15%',
+  },
+  POR_LIBERO: {
+    id: 'POR_LIBERO',
+    name: 'Libero',
+    role: 'POR',
+    description: 'Attento fuori dai pali, scivolate sui filtranti e chiusure aggressive.',
+    weights: { usc: 0.25, rif: 0.20, agg: 0.20, pos: 0.15, pas: 0.10, com: 0.10 },
+    weightsSummary: 'USC 25% • RIF 20% • AGG 20%',
+  },
+  POR_COSTRUTTORE: {
+    id: 'POR_COSTRUTTORE',
+    name: 'Costruttore',
+    role: 'POR',
+    description: 'Gestione eccellente del pallone con piedi e mani, ideale per 5vs4.',
+    weights: { pas: 0.35, rif: 0.15, pos: 0.15, com: 0.15, usc: 0.10, agg: 0.10 },
+    weightsSummary: 'PAS 35% • RIF 15% • POS 15%',
+  },
+};
+
+export const ROLE_DESCRIPTIONS: Record<MainRole, string> = {
+  POR: 'Reattività tra i pali, uscite nell’1vs1 e gestione del ritmo dal fondo.',
+  DIF: 'Chiusure difensive, senso della posizione e pulizia nell’uscita palla.',
+  EST: 'Corsa continua lungo la banda, 1vs1 in velocità e ripiegamenti rapidi.',
+  UNI: 'Duttilità totale: garantisce equilibrio, difende con ordine e supporta l’attacco.',
+  ATT: 'Terminale offensivo: protezione palla spalle alla porta e finalizzazione.',
+};
+
+/**
+ * Calcola l'Overall ponderato a partire dalle statistiche e dall'archetipo
+ */
+export function calculateArchetypeOverall(archetypeKey: string, attrs: Record<string, number>): number {
+  const arch = ARCHETYPES[archetypeKey];
+  if (!arch || !attrs) return 70;
+
+  let weightedSum = 0;
+  for (const [key, weight] of Object.entries(arch.weights)) {
+    const val = attrs[key] ?? 70;
+    weightedSum += val * weight;
+  }
+  return Math.round(weightedSum);
 }
 
-export interface GeneralStandingRow {
-  position: number;
-  playerId: string;
-  nickname: string;
-  role: PlayerRole;
-  matchesPlayed: number;
-  wins: number;
-  draws: number;
-  losses: number;
-  mvpCount: number;
-  totalPoints: number;
-}
+/**
+ * Genera le 6 statistiche proporzionate partendo dall'Overall target dell'admin
+ */
+export function generateAttributesFromOverall(archetypeKey: string, targetOverall: number): Record<string, number> {
+  const arch = ARCHETYPES[archetypeKey] || ARCHETYPES.ATT_BOMBER;
+  const target = Math.max(40, Math.min(99, targetOverall));
+  const result: Record<string, number> = {};
 
-export interface MatchPlayerPerformance {
-  playerId: string;
-  isGuest: boolean;
-  isMvp: boolean;
-  averageGrade: number;
-}
+  // Media pesi ideale: 1 / numero di attributi = ~0.166
+  const baseWeight = 1 / Object.keys(arch.weights).length;
 
-export interface FormCalculationResult {
-  playerId: string;
-  previousForm: number;
-  newForm: number;
-  status: FormStatus;
-  reason: string;
-}
-
-export function calculateLeagueAverageAppearances(players: PlayerInput[]): number {
-  const eligible = players.filter(p => !p.isGuest && p.isEligible && p.matchesPlayed >= 1);
-  if (eligible.length === 0) return 0;
-  const totalAppearances = eligible.reduce((acc, p) => acc + p.matchesPlayed, 0);
-  return Math.round(totalAppearances / eligible.length);
-}
-
-export function calculateOfficialStandings(
-  players: PlayerInput[],
-  mvpPointValue: number = 1.0
-): OfficialStandingRow[] {
-  const eligible = players.filter(p => !p.isGuest && p.isEligible && p.matchesPlayed >= 1);
-  if (eligible.length === 0) return [];
-
-  const leagueAvgAppearances = calculateLeagueAverageAppearances(players);
-
-  const calculated = eligible.map(player => {
-    const basePoints = (player.wins * 3) + (player.draws * 1) + (player.losses * 0) + (player.mvpCount * mvpPointValue);
-    const participationBonus = player.matchesPlayed * 1.0;
-    const missingAppearances = Math.max(0, leagueAvgAppearances - player.matchesPlayed);
-    const absenceMalus = -(missingAppearances * 0.5);
-    const realPoints = basePoints + participationBonus + absenceMalus;
-    const pointsPerMatch = player.matchesPlayed > 0 ? Number((realPoints / player.matchesPlayed).toFixed(2)) : 0;
-
-    return {
-      playerId: player.id,
-      nickname: player.nickname,
-      role: player.role,
-      matchesPlayed: player.matchesPlayed,
-      wins: player.wins,
-      draws: player.draws,
-      losses: player.losses,
-      mvpCount: player.mvpCount,
-      basePoints,
-      participationBonus,
-      absenceMalus,
-      realPoints,
-      pointsPerMatch,
-    };
-  });
-
-  calculated.sort((a, b) => {
-    if (b.pointsPerMatch !== a.pointsPerMatch) return b.pointsPerMatch - a.pointsPerMatch;
-    if (b.realPoints !== a.realPoints) return b.realPoints - a.realPoints;
-    return b.wins - a.wins;
-  });
-
-  return calculated.map((row, index) => ({
-    position: index + 1,
-    ...row,
-  }));
-}
-
-export function calculateGeneralStandings(
-  players: PlayerInput[],
-  mvpPointValue: number = 1.0
-): GeneralStandingRow[] {
-  const activePlayers = players.filter(p => !p.isGuest);
-
-  const calculated = activePlayers.map(p => {
-    const totalPoints = (p.wins * 3) + (p.draws * 1) + (p.mvpCount * mvpPointValue);
-    return {
-      playerId: p.id,
-      nickname: p.nickname,
-      role: p.role,
-      matchesPlayed: p.matchesPlayed,
-      wins: p.wins,
-      draws: p.draws,
-      losses: p.losses,
-      mvpCount: p.mvpCount,
-      totalPoints,
-    };
-  });
-
-  calculated.sort((a, b) => {
-    if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
-    if (b.wins !== a.wins) return b.wins - a.wins;
-    return b.matchesPlayed - a.matchesPlayed;
-  });
-
-  return calculated.map((row, index) => ({
-    position: index + 1,
-    ...row,
-  }));
-}
-
-export function getFormStatus(formValue: number): FormStatus {
-  if (formValue > 0) return 'UP';
-  if (formValue < 0) return 'DOWN';
-  return 'STABLE';
-}
-
-export function calculateDynamicOverall(
-  attributes: PlayerAttributesMovement | PlayerAttributesGK,
-  wins: number,
-  draws: number,
-  losses: number
-): number {
-  const values = Object.values(attributes);
-  const technicalAverage = values.reduce((sum, v) => sum + v, 0) / values.length;
-  const totalMatches = wins + draws + losses;
-  let performancePpmScale = technicalAverage;
-
-  if (totalMatches > 0) {
-    const rawPpm = ((wins * 3) + (draws * 1)) / totalMatches;
-    performancePpmScale = (rawPpm / 3) * 99;
+  for (const [stat, weight] of Object.entries(arch.weights)) {
+    // Statistiche con peso superiore alla media ricevono un boost proporzionale
+    // Statistiche secondarie ricevono una riduzione controllata
+    const diffRatio = (weight - baseWeight) / baseWeight;
+    const offset = Math.round(diffRatio * 18); // escursione tra -12 e +14 punti
+    result[stat] = Math.max(40, Math.min(99, target + offset));
   }
 
-  const updatedOverall = Math.round((technicalAverage * 0.75) + (performancePpmScale * 0.25));
-  return Math.min(99, Math.max(1, updatedOverall));
+  // Micro-bilanciamento finale per far coincidere esattamente la media ponderata
+  let currentOvr = calculateArchetypeOverall(archetypeKey, result);
+  let attempts = 0;
+  while (currentOvr !== target && attempts < 10) {
+    const diff = target - currentOvr;
+    const highestStat = Object.keys(arch.weights).reduce((a, b) => (arch.weights[a] > arch.weights[b] ? a : b));
+    result[highestStat] = Math.max(40, Math.min(99, result[highestStat] + (diff > 0 ? 1 : -1)));
+    currentOvr = calculateArchetypeOverall(archetypeKey, result);
+    attempts++;
+  }
+
+  return result;
 }
