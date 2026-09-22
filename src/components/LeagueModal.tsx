@@ -98,9 +98,15 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
   };
 
   const handleSelectExistingLeague = async (league: UserLeague) => {
+    // 1. Memorizza subito la lega attiva nel browser per evitare loop di redirect
+    localStorage.setItem('alci_league_id', league.league_id);
+    localStorage.setItem('active_league_id', league.league_id);
+    localStorage.setItem('alci_user_role', league.role);
+
     setCurrentLeagueId(league.league_id);
     setCurrentRole(league.role);
 
+    // 2. Se l'utente è amministratore o ha già una carta, entra direttamente
     const { data: existingPlayer } = await supabase
       .from('players')
       .select('id')
@@ -108,7 +114,7 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
       .eq('user_id', userId)
       .maybeSingle();
 
-    if (existingPlayer) {
+    if (existingPlayer || league.role === 'admin') {
       onLeagueSelected(league.league_id, league.role);
     } else {
       await fetchDummies(league.league_id);
@@ -144,6 +150,10 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
           role: 'admin',
         });
 
+        localStorage.setItem('alci_league_id', newLeague.id);
+        localStorage.setItem('active_league_id', newLeague.id);
+        localStorage.setItem('alci_user_role', 'admin');
+
         setCurrentLeagueId(newLeague.id);
         setCurrentRole('admin');
         setStep('profile');
@@ -161,6 +171,10 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
           user_id: userId,
           role: 'member',
         });
+
+        localStorage.setItem('alci_league_id', league.id);
+        localStorage.setItem('active_league_id', league.id);
+        localStorage.setItem('alci_user_role', 'member');
 
         setCurrentLeagueId(league.id);
         setCurrentRole('member');
@@ -197,7 +211,6 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
 
         if (claimErr) throw claimErr;
       } else {
-        // Base di partenza equilibrata a 70 OVR
         const baseAttrs = generateAttributesFromOverall(selectedArchetype, 70);
         const baseOvr = calculateArchetypeOverall(selectedArchetype, baseAttrs);
 
@@ -460,7 +473,6 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
                     </div>
                   </div>
 
-                  {/* RUOLO PRINCIPALE */}
                   <div>
                     <label className="mb-1 block text-xs font-semibold uppercase text-slate-400">
                       Ruolo Principale
@@ -486,7 +498,6 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
                     </p>
                   </div>
 
-                  {/* ARCHETIPO & STILE */}
                   <div>
                     <label className="mb-1 block text-xs font-semibold uppercase text-slate-400">
                       Archetipo & Stile
