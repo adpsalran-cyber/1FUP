@@ -4,7 +4,7 @@ import { Route as rootRoute } from './routes/__root';
 import { Route as indexRoute } from './routes/index';
 import { Route as pollsRoute } from './routes/polls';
 import { Route as standingsRoute } from './routes/standings';
-import { Route as playersRoute } from './routes/players.index';
+import { Route as playersRoute } from './routes/players';
 import { Route as matchDetailRoute } from './routes/matches.$matchId';
 import { Route as adminRoute } from './routes/admin';
 
