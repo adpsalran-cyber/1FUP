@@ -143,6 +143,34 @@ function PollsPage() {
     });
     return top;
   }, [votes, availableSlots]);
+      // Controlla se il giocatore ha già un voto registrato per questo sondaggio
+      const existingVote = votes?.find((v: any) => v.player_id === targetPlayerId);
+
+      let error;
+      if (existingVote) {
+        const res = await supabase
+          .from('poll_votes')
+          .update({
+            selected_slots: selectedSlots,
+            is_confirmed: isConfirmed,
+            queue_position: queuePosition,
+          })
+          .eq('id', existingVote.id);
+        error = res.error;
+      } else {
+        const res = await supabase
+          .from('poll_votes')
+          .insert({
+            poll_id: poll.id,
+            player_id: targetPlayerId,
+            guest_name: null,
+            selected_slots: selectedSlots,
+            is_confirmed: isConfirmed,
+            queue_position: queuePosition,
+            created_at: new Date().toISOString(),
+          });
+        error = res.error;
+      }
 
   // Mutazione: Voto per il giocatore
   const voteMutation = useMutation({
@@ -165,17 +193,7 @@ function PollsPage() {
         : currentVotes.filter((v: any) => !v.is_confirmed).length + 1;
 
       const { error } = await supabase.from('poll_votes').upsert(
-        {
-          poll_id: poll.id,
-          player_id: targetPlayerId,
-          guest_name: null,
-          selected_slots: selectedSlots,
-          is_confirmed: isConfirmed,
-          queue_position: queuePosition,
-          created_at: new Date().toISOString(),
-        },
-        { onConflict: 'poll_id,player_id' }
-      );
+
 
       if (error) throw new Error(error.message);
     },
