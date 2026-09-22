@@ -1,5 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import {
+  ARCHETYPES,
+  ROLE_DESCRIPTIONS,
+  MainRole,
+  generateAttributesFromOverall,
+  calculateArchetypeOverall,
+} from '../lib/engine';
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL || '',
@@ -10,13 +17,6 @@ interface LeagueModalProps {
   userId: string;
   onLeagueSelected: (leagueId: string, role: string) => void;
 }
-
-const ARCHETYPES = {
-  Portiere: ['Saracinesca', 'Portiere Volante', 'Reattivo'],
-  Difensore: ['Muro Fisico', 'Impostatore', 'Laterale Difensivo'],
-  Centrocampista: ['Regista Totale', 'Mediano Incursore', 'Metronomo'],
-  Attaccante: ['Bomber d\'Area', 'Boa / Sponda', 'Falso Nueve', 'Folletto Rapido'],
-};
 
 interface UserLeague {
   league_id: string;
@@ -36,13 +36,12 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
   const [currentLeagueId, setCurrentLeagueId] = useState<string | null>(null);
   const [currentRole, setCurrentRole] = useState<string>('member');
 
-  // Profilo Giocatore
+  // Profilo Giocatore (SENZA numero di maglia)
   const [profileMode, setProfileMode] = useState<'create' | 'claim'>('create');
   const [playerName, setPlayerName] = useState('');
-  const [number, setNumber] = useState('10');
   const [preferredFoot, setPreferredFoot] = useState<'Destro' | 'Sinistro' | 'Ambidestro'>('Destro');
-  const [position, setPosition] = useState<'Portiere' | 'Difensore' | 'Centrocampista' | 'Attaccante'>('Attaccante');
-  const [archetype, setArchetype] = useState('Bomber d\'Area');
+  const [selectedRole, setSelectedRole] = useState<MainRole>('ATT');
+  const [selectedArchetype, setSelectedArchetype] = useState<string>('ATT_BOMBER');
 
   // Dummy players per il claim
   const [dummyPlayers, setDummyPlayers] = useState<any[]>([]);
@@ -52,7 +51,11 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
   const [fetchingLeagues, setFetchingLeagues] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Carica le leghe a cui l'utente appartiene già
+  // Archetipi disponibili per il ruolo selezionato
+  const availableArchetypes = useMemo(() => {
+    return Object.values(ARCHETYPES).filter((a) => a.role === selectedRole);
+  }, [selectedRole]);
+
   useEffect(() => {
     fetchUserLeagues();
   }, [userId]);
@@ -75,11 +78,7 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
         }));
 
       setMyLeagues(list);
-      if (list.length === 0) {
-        setLeagueMode('create');
-      } else {
-        setLeagueMode('my_leagues');
-      }
+      setLeagueMode(list.length === 0 ? 'create' : 'my_leagues');
     } else {
       setLeagueMode('create');
     }
@@ -89,7 +88,7 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
   const fetchDummies = async (leagueId: string) => {
     const { data: dummies } = await supabase
       .from('players')
-      .select('id, name, number, archetype, position')
+      .select('id, name, archetype, role')
       .eq('league_id', leagueId)
       .eq('is_dummy', true);
 
@@ -98,12 +97,10 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
     }
   };
 
-  // Selezione di una lega esistente dall'elenco "Le mie leghe"
   const handleSelectExistingLeague = async (league: UserLeague) => {
     setCurrentLeagueId(league.league_id);
     setCurrentRole(league.role);
 
-    // Controlla se ha già una carta giocatore per questa lega
     const { data: existingPlayer } = await supabase
       .from('players')
       .select('id')
@@ -125,7 +122,6 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
     setTimeout(() => setCopiedCode(null), 2000);
   };
 
-  // Creazione o join lega
   const handleLeagueSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -172,13 +168,20 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
         setStep('profile');
       }
     } catch (err: any) {
-      setError(err.message || 'Errore durante l\'operazione');
+      setError(err.message || "Errore durante l'operazione");
     } finally {
       setLoading(false);
     }
   };
 
-  // Gestione profilo calciatore
+  const handleRoleChange = (role: MainRole) => {
+    setSelectedRole(role);
+    const firstArch = Object.values(ARCHETYPES).find((a) => a.role === role);
+    if (firstArch) {
+      setSelectedArchetype(firstArch.id);
+    }
+  };
+
   const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentLeagueId) return;
@@ -194,14 +197,21 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
 
         if (claimErr) throw claimErr;
       } else {
+        // Base di partenza equilibrata a 70 OVR
+        const baseAttrs = generateAttributesFromOverall(selectedArchetype, 70);
+        const baseOvr = calculateArchetypeOverall(selectedArchetype, baseAttrs);
+
         const { error: playerErr } = await supabase.from('players').insert({
           league_id: currentLeagueId,
           user_id: userId,
           name: playerName.trim(),
-          number: parseInt(number, 10) || 10,
           preferred_foot: preferredFoot,
-          position,
-          archetype,
+          role: selectedRole,
+          archetype: selectedArchetype,
+          overall: baseOvr,
+          attributes: baseAttrs,
+          teamwork: 'Medio',
+          gk_efficiency: 'Media',
           is_dummy: false,
         });
 
@@ -218,7 +228,7 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-md">
-      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-800 bg-[#121721] p-6 shadow-2xl">
+      <div className="w-full max-w-md max-h-[92vh] overflow-y-auto rounded-2xl border border-slate-800 bg-[#121721] p-5 shadow-2xl">
         {step === 'league' ? (
           <div>
             <h2 className="mb-1 text-center font-bebas text-3xl tracking-wide text-amber-400">
@@ -228,7 +238,6 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
               Scegli una tua lega, inserisci un codice o fondane una nuova
             </p>
 
-            {/* Menu modalità a 3 Tab */}
             <div className="mb-5 flex rounded-xl bg-slate-900/90 p-1 border border-slate-800 text-[11px] font-bold">
               {myLeagues.length > 0 && (
                 <button
@@ -267,7 +276,6 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
               </div>
             )}
 
-            {/* TAB 1: LISTA DELLE MIE LEGHE ESISTENTI */}
             {leagueMode === 'my_leagues' && (
               <div className="space-y-3">
                 {fetchingLeagues ? (
@@ -299,7 +307,6 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
                         </button>
                       </div>
 
-                      {/* Box Codice Invito */}
                       <div className="flex items-center justify-between bg-[#0b0e14] rounded-lg px-2.5 py-1.5 border border-slate-800 text-xs">
                         <span className="text-[11px] text-slate-400">
                           Codice: <strong className="text-amber-400 font-mono tracking-widest">{lg.invite_code}</strong>
@@ -317,7 +324,6 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
               </div>
             )}
 
-            {/* TAB 2 & 3: FORM CREAZIONE O INGRESSO CON CODICE */}
             {leagueMode !== 'my_leagues' && (
               <form onSubmit={handleLeagueSubmit} className="space-y-4">
                 {leagueMode === 'join' ? (
@@ -370,7 +376,7 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
               SCHEDA CALCIATORE
             </h2>
             <p className="mb-4 text-center text-xs text-slate-400">
-              Configura la tua carta per la lega selezionata
+              Scegli il tuo stile di gioco per questa lega
             </p>
 
             {dummyPlayers.length > 0 && (
@@ -406,7 +412,7 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
               {profileMode === 'claim' ? (
                 <div>
                   <label className="mb-1 block text-xs font-semibold uppercase text-slate-400">
-                    Seleziona il tuo giocatore
+                    Seleziona il tuo giocatore pre-caricato
                   </label>
                   <select
                     required
@@ -417,97 +423,109 @@ export const LeagueModal: React.FC<LeagueModalProps> = ({ userId, onLeagueSelect
                     <option value="">-- Scegli giocatore pre-caricato dall'Admin --</option>
                     {dummyPlayers.map((dp) => (
                       <option key={dp.id} value={dp.id}>
-                        #{dp.number || '10'} {dp.name} ({dp.position} - {dp.archetype})
+                        {dp.name} ({dp.role || 'ATT'} - {ARCHETYPES[dp.archetype]?.name || dp.archetype})
                       </option>
                     ))}
                   </select>
                 </div>
               ) : (
                 <>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase text-slate-400">
-                      Nome / Soprannome
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={playerName}
-                      onChange={(e) => setPlayerName(e.target.value)}
-                      placeholder="es. Salvatore"
-                      className="w-full rounded-xl border border-slate-800 bg-slate-900/80 px-4 py-2 text-sm text-slate-100 focus:border-amber-400 focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="col-span-2">
                       <label className="mb-1 block text-xs font-semibold uppercase text-slate-400">
-                        N° Maglia
+                        Nome / Soprannome
                       </label>
                       <input
-                        type="number"
-                        value={number}
-                        onChange={(e) => setNumber(e.target.value)}
-                        className="w-full rounded-xl border border-slate-800 bg-slate-900/80 px-4 py-2 text-sm text-slate-100 focus:border-amber-400 focus:outline-none"
+                        type="text"
+                        required
+                        value={playerName}
+                        onChange={(e) => setPlayerName(e.target.value)}
+                        placeholder="es. Salvatore"
+                        className="w-full rounded-xl border border-slate-800 bg-slate-900/80 px-3.5 py-2 text-sm text-slate-100 focus:border-amber-400 focus:outline-none"
                       />
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-semibold uppercase text-slate-400">
-                        Piede Preferito
+                        Piede
                       </label>
                       <select
                         value={preferredFoot}
                         onChange={(e: any) => setPreferredFoot(e.target.value)}
-                        className="w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-amber-400 focus:outline-none"
+                        className="w-full rounded-xl border border-slate-800 bg-slate-900 px-2 py-2 text-xs text-slate-100 focus:border-amber-400 focus:outline-none"
                       >
                         <option value="Destro">Destro</option>
                         <option value="Sinistro">Sinistro</option>
-                        <option value="Ambidestro">Ambidestro</option>
+                        <option value="Ambidestro">Ambi</option>
                       </select>
                     </div>
                   </div>
 
+                  {/* RUOLO PRINCIPALE */}
                   <div>
                     <label className="mb-1 block text-xs font-semibold uppercase text-slate-400">
                       Ruolo Principale
                     </label>
-                    <select
-                      value={position}
-                      onChange={(e: any) => {
-                        const newPos = e.target.value;
-                        setPosition(newPos);
-                        setArchetype(ARCHETYPES[newPos as keyof typeof ARCHETYPES][0]);
-                      }}
-                      className="w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-2 text-sm text-slate-100 focus:border-amber-400 focus:outline-none"
-                    >
-                      <option value="Portiere">Portiere</option>
-                      <option value="Difensore">Difensore</option>
-                      <option value="Centrocampista">Centrocampista</option>
-                      <option value="Attaccante">Attaccante</option>
-                    </select>
+                    <div className="grid grid-cols-5 gap-1">
+                      {(['POR', 'DIF', 'EST', 'UNI', 'ATT'] as MainRole[]).map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => handleRoleChange(r)}
+                          className={`py-1.5 rounded-lg font-bebas text-sm border transition ${
+                            selectedRole === r
+                              ? 'bg-amber-400 text-slate-950 border-amber-400 font-bold'
+                              : 'bg-slate-900/80 text-slate-400 border-slate-800'
+                          }`}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-slate-400 bg-slate-900/60 p-2 rounded-lg border border-slate-800 leading-snug">
+                      {ROLE_DESCRIPTIONS[selectedRole]}
+                    </p>
                   </div>
 
+                  {/* ARCHETIPO & STILE */}
                   <div>
                     <label className="mb-1 block text-xs font-semibold uppercase text-slate-400">
-                      Archetipo / Stile di Gioco
+                      Archetipo & Stile
                     </label>
-                    <select
-                      value={archetype}
-                      onChange={(e) => setArchetype(e.target.value)}
-                      className="w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-2 text-sm text-amber-300 focus:border-amber-400 focus:outline-none"
-                    >
-                      {ARCHETYPES[position].map((arch) => (
-                        <option key={arch} value={arch}>
-                          {arch}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                      {availableArchetypes.map((arch) => {
+                        const active = selectedArchetype === arch.id;
+                        return (
+                          <div
+                            key={arch.id}
+                            onClick={() => setSelectedArchetype(arch.id)}
+                            className={`p-2.5 rounded-xl border cursor-pointer transition ${
+                              active
+                                ? 'bg-amber-400/10 border-amber-400 ring-1 ring-amber-400/60'
+                                : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-0.5">
+                              <span className={`font-bebas text-base ${active ? 'text-amber-400' : 'text-slate-200'}`}>
+                                {arch.name}
+                              </span>
+                              <span className="text-[10px] font-mono text-amber-300/80 bg-black/40 px-1.5 py-0.5 rounded border border-slate-800">
+                                {arch.weightsSummary}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 leading-tight">
+                              {arch.description}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </>
               )}
 
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || (!playerName.trim() && profileMode === 'create')}
                 className="mt-2 w-full rounded-xl bg-amber-400 py-3 font-bebas text-lg tracking-wider text-slate-950 transition hover:bg-amber-300 disabled:opacity-50"
               >
                 {loading ? 'SALVATAGGIO...' : 'COMPLETA ED ENTRA IN SQUADRA'}
