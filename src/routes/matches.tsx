@@ -142,7 +142,7 @@ function MatchesPage() {
     },
   });
 
-  // Supporto completo login username/password e ruolo admin
+  // Supporto completo login username/password e ruolo admin verificato
   const isAdmin = typeof window !== 'undefined' && Boolean(
     localStorage.getItem('alci_user_role') === 'admin' ||
     localStorage.getItem('user_role') === 'admin' ||
@@ -391,11 +391,6 @@ function MatchesPage() {
           ALCI FUTSAL
         </span>
         <h1 className="font-bebas text-4xl text-white tracking-wider">PARTITE</h1>
-      </div>
-
-      {/* BANNER DI TEST VISIVO PER FORZATURA VERIFICA DEPLOY */}
-      <div className="bg-rose-600 text-white font-bold p-3 text-center rounded-xl text-xs tracking-wider shadow-lg border border-rose-400">
-        TEST DEPLOY ATTIVO — ORE: {new Date().toLocaleTimeString('it-IT')} | ADMIN: {String(isAdmin)}
       </div>
 
       {/* Switch Tab: IN PROGRAMMA / GIOCATE */}
