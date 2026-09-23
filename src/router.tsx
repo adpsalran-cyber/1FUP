@@ -1,4 +1,4 @@
-import { createRouter } from '@tanstack/react-router';
+import { createRouter, createRoute } from '@tanstack/react-router';
 import { Route as rootRoute } from './routes/__root';
 import { Route as indexRoute } from './routes/index';
 import { Route as matchesRoute } from './routes/matches';
@@ -6,6 +6,14 @@ import { Route as standingsRoute } from './routes/standings';
 import { Route as playersRoute } from './routes/players';
 import { Route as pollsRoute } from './routes/polls';
 import { Route as adminRoute } from './routes/admin';
+import { ProfileView } from './components/ProfileView';
+
+// Registra la rotta per il profilo usando direttamente il componente ProfileView
+const profileRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/profile',
+  component: ProfileView,
+});
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -14,6 +22,7 @@ const routeTree = rootRoute.addChildren([
   playersRoute,
   pollsRoute,
   adminRoute,
+  profileRoute,
 ]);
 
 export const router = createRouter({ routeTree });
