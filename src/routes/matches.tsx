@@ -1,218 +1,686 @@
 import React, { useState } from 'react';
 import { createRoute } from '@tanstack/react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Route as rootRoute } from './__root';
 import { supabase } from '../lib/actions';
-
-export function MatchesPage() {
-  const [activeTab, setActiveTab] = useState<'giocate' | 'programmate' | 'storico'>('giocate');
-  const [selectedMatch, setSelectedMatch] = useState<any | null>(null);
-
-  const leagueId = typeof window !== 'undefined'
-    ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
-    : null;
-
-  const { data: matches, isLoading } = useQuery({
-    queryKey: ['league_matches', leagueId],
-    queryFn: async () => {
-      let query = supabase
-        .from('matches')
-        .select(`
-          id,
-          played_at,
-          scheduled_at,
-          status,
-          home_score,
-          away_score,
-          match_mvp_id,
-          match_summary,
-          league_id
-        `)
-        .order('played_at', { ascending: false });
-
-      if (leagueId) {
-        query = query.eq('league_id', leagueId);
-      }
-
-      const res = await query;
-      if (res.error) throw new Error(res.error.message);
-      return res.data || [];
-    },
-  });
-
-  const matchesList = matches || [];
-
-  const filteredMatches = matchesList.filter((m: any) => {
-    if (activeTab === 'giocate') return m.status === 'completed';
-    if (activeTab === 'programmate') return m.status === 'scheduled';
-    return true;
-  });
-
-  return (
-    <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
-      <div className="border-b border-[#222c42] pb-3 flex justify-between items-center">
-        <div>
-          <h1 className="font-bebas text-3xl text-slate-100">PARTITE</h1>
-          <p className="text-xs text-slate-400">Resoconti, convocazioni e archivio</p>
-        </div>
-      </div>
-
-      <div className="flex rounded-xl bg-slate-900/90 p-1 border border-slate-800 text-xs font-semibold">
-        <button
-          onClick={() => setActiveTab('giocate')}
-          className={`flex-1 py-2 rounded-lg transition uppercase ${
-            activeTab === 'giocate' ? 'bg-amber-400 text-slate-950 shadow font-bold' : 'text-slate-400'
-          }`}
-        >
-          Giocate
-        </button>
-        <button
-          onClick={() => setActiveTab('programmate')}
-          className={`flex-1 py-2 rounded-lg transition uppercase ${
-            activeTab === 'programmate' ? 'bg-amber-400 text-slate-950 shadow font-bold' : 'text-slate-400'
-          }`}
-        >
-          Prossime
-        </button>
-        <button
-          onClick={() => setActiveTab('storico')}
-          className={`flex-1 py-2 rounded-lg transition uppercase ${
-            activeTab === 'storico' ? 'bg-amber-400 text-slate-950 shadow font-bold' : 'text-slate-400'
-          }`}
-        >
-          Tutte
-        </button>
-      </div>
-
-      {isLoading ? (
-        <div className="p-8 text-center text-amber-400 font-bebas text-lg animate-pulse">
-          CARICAMENTO PARTITE...
-        </div>
-      ) : filteredMatches.length === 0 ? (
-        <div className="bg-[#151b28] border border-[#222c42] rounded-xl p-8 text-center space-y-2">
-          <p className="font-bebas text-xl text-slate-300">NESSUNA PARTITA IN QUESTA SEZIONE</p>
-          <p className="text-xs text-slate-400">
-            {activeTab === 'giocate'
-              ? 'Nessuna partita disputata registrata.'
-              : activeTab === 'programmate'
-              ? 'Nessuna gara in programma.'
-              : 'Nessuna partita presente a sistema.'}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {filteredMatches.map((match: any) => {
-            const isCompleted = match.status === 'completed';
-            const dateStr = match.played_at || match.scheduled_at;
-            const formattedDate = dateStr
-              ? new Date(dateStr).toLocaleDateString('it-IT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-              : 'Data non definita';
-
-            return (
-              <div
-                key={match.id}
-                onClick={() => setSelectedMatch(match)}
-                className="bg-[#151b28] border border-[#222c42] hover:border-amber-400/40 rounded-xl p-4 transition cursor-pointer space-y-3"
-              >
-                <div className="flex justify-between items-center text-[11px] text-slate-400 border-b border-[#222c42]/60 pb-2">
-                  <span className="flex items-center gap-1 font-medium">
-                    📅 {formattedDate}
-                  </span>
-                  <span
-                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                      isCompleted ? 'bg-emerald-950/70 text-emerald-400 border border-emerald-800' : 'bg-amber-950/70 text-amber-400 border border-amber-800'
-                    }`}
-                  >
-                    {isCompleted ? 'Conclusa' : 'In Programma'}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between px-2 py-1">
-                  <span className="font-bebas text-lg text-slate-200">SQUADRA A</span>
-                  <div className="flex items-center gap-2 bg-[#0b0e14] px-3 py-1 rounded-lg border border-[#222c42]">
-                    <span className="font-bebas text-2xl text-amber-400">
-                      {match.home_score ?? '-'}
-                    </span>
-                    <span className="text-slate-500 font-bold">:</span>
-                    <span className="font-bebas text-2xl text-amber-400">
-                      {match.away_score ?? '-'}
-                    </span>
-                  </div>
-                  <span className="font-bebas text-lg text-slate-200">SQUADRA B</span>
-                </div>
-
-                {isCompleted && match.match_summary && (
-                  <p className="text-xs text-slate-400 line-clamp-2 bg-[#0b0e14]/50 p-2 rounded-lg italic">
-                    "{match.match_summary}"
-                  </p>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {selectedMatch && (
-        <div
-          className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 z-50"
-          onClick={() => setSelectedMatch(null)}
-        >
-          <div
-            className="bg-[#151b28] border border-[#222c42] rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex justify-between items-start border-b border-[#222c42] pb-3">
-              <div>
-                <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
-                  RESOCONTO GARA
-                </span>
-                <h3 className="font-bebas text-2xl text-slate-100">
-                  {selectedMatch.home_score !== null ? `${selectedMatch.home_score} - ${selectedMatch.away_score}` : 'In programma'}
-                </h3>
-              </div>
-              <button
-                onClick={() => setSelectedMatch(null)}
-                className="w-7 h-7 rounded-full bg-[#0b0e14] text-slate-400 flex items-center justify-center hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <span className="text-slate-500 font-semibold block uppercase text-[10px]">Data e Ora</span>
-                <span className="text-slate-200">
-                  {selectedMatch.played_at || selectedMatch.scheduled_at
-                    ? new Date(selectedMatch.played_at || selectedMatch.scheduled_at).toLocaleString('it-IT')
-                    : 'Non specificata'}
-                </span>
-              </div>
-
-              {selectedMatch.match_summary && (
-                <div>
-                  <span className="text-slate-500 font-semibold block uppercase text-[10px]">Cronaca Partita</span>
-                  <div className="bg-[#0b0e14] p-3 rounded-xl border border-[#222c42] text-slate-300 leading-relaxed whitespace-pre-wrap">
-                    {selectedMatch.match_summary}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <button
-              onClick={() => setSelectedMatch(null)}
-              className="w-full py-2.5 bg-[#0b0e14] hover:bg-slate-800 text-slate-300 font-semibold text-xs rounded-xl transition"
-            >
-              Chiudi
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
   path: '/matches',
   component: MatchesPage,
 });
+
+// Componente per le 5 stelle con mezze stelle (valori da 0.5 a 5.0 a passi di 0.5)
+function StarRating({
+  value,
+  onChange,
+  disabled = false,
+}: {
+  value: number;
+  onChange?: (val: number) => void;
+  disabled?: boolean;
+}) {
+  const stars = [1, 2, 3, 4, 5];
+
+  return (
+    <div className="flex items-center gap-0.5 select-none">
+      {stars.map((starIndex) => {
+        const fullVal = starIndex;
+        const halfVal = starIndex - 0.5;
+        const isFull = value >= fullVal;
+        const isHalf = !isFull && value >= halfVal;
+
+        return (
+          <div
+            key={starIndex}
+            className={`relative flex items-center justify-center text-xl cursor-pointer ${
+              disabled ? 'pointer-events-none opacity-80' : ''
+            }`}
+          >
+            {/* Metà sinistra cliccabile (0.5) */}
+            <span
+              onClick={() => !disabled && onChange && onChange(halfVal)}
+              className="absolute left-0 top-0 w-1/2 h-full z-10"
+              title={`${halfVal} stelle`}
+            />
+            {/* Metà destra cliccabile (1.0) */}
+            <span
+              onClick={() => !disabled && onChange && onChange(fullVal)}
+              className="absolute right-0 top-0 w-1/2 h-full z-10"
+              title={`${fullVal} stelle`}
+            />
+
+            {/* Render grafico stella (Piena, Mezza o Vuota) */}
+            <span className="leading-none text-amber-400">
+              {isFull ? '★' : isHalf ? '⯨' : '☆'}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MatchesPage() {
+  const queryClient = useQueryClient();
+  const [tab, setTab] = useState<'scheduled' | 'completed'>('scheduled');
+  const [selectedMatch, setSelectedMatch] = useState<any | null>(null);
+
+  // Form inserimento punteggio
+  const [scoreTeam1, setScoreTeam1] = useState<number>(0);
+  const [scoreTeam2, setScoreTeam2] = useState<number>(0);
+  const [savingScore, setSavingScore] = useState(false);
+
+  // Stato Voti Locali per la partita selezionata
+  const [userRatings, setUserRatings] = useState<Record<string, number>>({});
+  const [selectedMvp, setSelectedMvp] = useState<string | null>(null);
+  const [submittingVotes, setSubmittingVotes] = useState(false);
+
+  const activeLeagueId = typeof window !== 'undefined'
+    ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
+    : null;
+
+  const isAdmin = typeof window !== 'undefined' && localStorage.getItem('alci_user_role') === 'admin';
+
+  // 1. Recupera partite della lega
+  const { data: matches, isLoading } = useQuery({
+    queryKey: ['matches_list', activeLeagueId],
+    queryFn: async () => {
+      if (!activeLeagueId) return [];
+      const { data, error } = await supabase
+        .from('matches')
+        .select('*')
+        .eq('league_id', activeLeagueId)
+        .order('created_at', { ascending: false });
+      if (error) return [];
+      return data || [];
+    },
+  });
+
+  // 2. Recupera l'utente corrente
+  const { data: currentUser } = useQuery({
+    queryKey: ['current_user'],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      return user;
+    },
+  });
+
+  // 3. Recupera voti già dati dall'utente per la partita selezionata
+  const { data: existingVotes, refetch: refetchVotes } = useQuery({
+    queryKey: ['match_votes', selectedMatch?.id, currentUser?.id],
+    enabled: !!selectedMatch?.id && !!currentUser?.id,
+    queryFn: async () => {
+      const { data: ratings } = await supabase
+        .from('match_ratings')
+        .select('rated_player_id, stars')
+        .eq('match_id', selectedMatch.id)
+        .eq('voter_user_id', currentUser.id);
+
+      const { data: mvpVote } = await supabase
+        .from('match_mvp_votes')
+        .select('voted_player_id')
+        .eq('match_id', selectedMatch.id)
+        .eq('voter_user_id', currentUser.id)
+        .maybeSingle();
+
+      const ratingMap: Record<string, number> = {};
+      ratings?.forEach((r: any) => {
+        ratingMap[r.rated_player_id] = Number(r.stars);
+      });
+
+      setUserRatings(ratingMap);
+      if (mvpVote?.voted_player_id) {
+        setSelectedMvp(mvpVote.voted_player_id);
+      }
+
+      return { ratingMap, mvp: mvpVote?.voted_player_id };
+    },
+  });
+
+  // 4. Calcolo medie voti e conteggio MVP per la partita selezionata
+  const { data: summaryVotes } = useQuery({
+    queryKey: ['summary_votes', selectedMatch?.id],
+    enabled: !!selectedMatch?.id,
+    queryFn: async () => {
+      const { data: allRatings } = await supabase
+        .from('match_ratings')
+        .select('rated_player_id, stars')
+        .eq('match_id', selectedMatch.id);
+
+      const { data: allMvpVotes } = await supabase
+        .from('match_mvp_votes')
+        .select('voted_player_id')
+        .eq('match_id', selectedMatch.id);
+
+      const averages: Record<string, { avg: number; count: number }> = {};
+      allRatings?.forEach((r: any) => {
+        if (!averages[r.rated_player_id]) {
+          averages[r.rated_player_id] = { avg: 0, count: 0 };
+        }
+        averages[r.rated_player_id].avg += Number(r.stars) * 2; // Da stelle a voto in decimi
+        averages[r.rated_player_id].count += 1;
+      });
+
+      Object.keys(averages).forEach((pId) => {
+        averages[pId].avg = Number((averages[pId].avg / averages[pId].count).toFixed(1));
+      });
+
+      const mvpCounts: Record<string, number> = {};
+      allMvpVotes?.forEach((m: any) => {
+        mvpCounts[m.voted_player_id] = (mvpCounts[m.voted_player_id] || 0) + 1;
+      });
+
+      return { averages, mvpCounts };
+    },
+  });
+
+  const scheduledMatches = (matches || []).filter((m: any) => m.status !== 'completed');
+  const completedMatches = (matches || []).filter((m: any) => m.status === 'completed');
+
+  // Inserimento Risultato e Aggiornamento Classifica
+  const handleSaveResult = async (match: any) => {
+    if (scoreTeam1 < 0 || scoreTeam2 < 0) {
+      alert('I punteggi non possono essere negativi.');
+      return;
+    }
+
+    setSavingScore(true);
+    try {
+      const now = new Date();
+      // Scadenza votazione tra 2 ore esatte
+      const deadline = new Date(now.getTime() + 2 * 60 * 60 * 1000).toISOString();
+
+      // 1. Aggiorna partita
+      const { error: matchError } = await supabase
+        .from('matches')
+        .update({
+          score_team1: scoreTeam1,
+          score_team2: scoreTeam2,
+          status: 'completed',
+          voting_deadline: deadline,
+        })
+        .eq('id', match.id);
+
+      if (matchError) throw matchError;
+
+      // 2. Calcola esito per ciascuna squadra
+      const isDraw = scoreTeam1 === scoreTeam2;
+      const team1Won = scoreTeam1 > scoreTeam2;
+      const team2Won = scoreTeam2 > scoreTeam1;
+
+      const team1Players = match.team1_players || [];
+      const team2Players = match.team2_players || [];
+
+      const updatePlayerStats = async (players: any[], won: boolean, draw: boolean) => {
+        for (const p of players) {
+          if (!p.id) continue;
+          const { data: dbPlayer } = await supabase
+            .from('players')
+            .select('matches_played, wins, draws, losses')
+            .eq('id', p.id)
+            .maybeSingle();
+
+          if (dbPlayer) {
+            const mp = (dbPlayer.matches_played || 0) + 1;
+            const w = (dbPlayer.wins || 0) + (won ? 1 : 0);
+            const d = (dbPlayer.draws || 0) + (draw ? 1 : 0);
+            const l = (dbPlayer.losses || 0) + (!won && !draw ? 1 : 0);
+
+            await supabase
+              .from('players')
+              .update({ matches_played: mp, wins: w, draws: d, losses: l })
+              .eq('id', p.id);
+          }
+        }
+      };
+
+      await updatePlayerStats(team1Players, team1Won, isDraw);
+      await updatePlayerStats(team2Players, team2Won, isDraw);
+
+      alert('Risultato salvato! Classifica aggiornata. Votazioni aperte per 2 ore.');
+      queryClient.invalidateQueries({ queryKey: ['matches_list'] });
+      queryClient.invalidateQueries({ queryKey: ['standings_table'] });
+      setSelectedMatch(null);
+    } catch (err: any) {
+      alert(`Errore salvataggio risultato: ${err.message}`);
+    } finally {
+      setSavingScore(false);
+    }
+  };
+
+  // Invio voti con stelle e MVP
+  const handleSubmitVotes = async () => {
+    if (!currentUser?.id || !selectedMatch?.id) return;
+    setSubmittingVotes(true);
+
+    try {
+      // Salva stelle
+      for (const [playerId, stars] of Object.entries(userRatings)) {
+        await supabase.from('match_ratings').upsert(
+          {
+            match_id: selectedMatch.id,
+            voter_user_id: currentUser.id,
+            rated_player_id: playerId,
+            stars: stars,
+          },
+          { onConflict: 'match_id,voter_user_id,rated_player_id' }
+        );
+      }
+
+      // Salva MVP
+      if (selectedMvp) {
+        await supabase.from('match_mvp_votes').upsert(
+          {
+            match_id: selectedMatch.id,
+            voter_user_id: currentUser.id,
+            voted_player_id: selectedMvp,
+          },
+          { onConflict: 'match_id,voter_user_id' }
+        );
+
+        // Verifica se nominare MVP ufficiale della partita
+        const { data: mvpVotes } = await supabase
+          .from('match_mvp_votes')
+          .select('voted_player_id')
+          .eq('match_id', selectedMatch.id);
+
+        const counts: Record<string, number> = {};
+        mvpVotes?.forEach((v: any) => {
+          counts[v.voted_player_id] = (counts[v.voted_player_id] || 0) + 1;
+        });
+
+        let topPlayerId = null;
+        let maxVotes = 0;
+        for (const [pId, cnt] of Object.entries(counts)) {
+          if (cnt > maxVotes) {
+            maxVotes = cnt;
+            topPlayerId = pId;
+          }
+        }
+
+        if (topPlayerId) {
+          await supabase
+            .from('matches')
+            .update({ mvp_player_id: topPlayerId })
+            .eq('id', selectedMatch.id);
+
+          // Incrementa mvp_count del giocatore
+          const { data: pData } = await supabase
+            .from('players')
+            .select('mvp_count')
+            .eq('id', topPlayerId)
+            .maybeSingle();
+
+          if (pData) {
+            await supabase
+              .from('players')
+              .update({ mvp_count: (pData.mvp_count || 0) + 1 })
+              .eq('id', topPlayerId);
+          }
+        }
+      }
+
+      alert('Voti registrati con successo!');
+      refetchVotes();
+      queryClient.invalidateQueries({ queryKey: ['summary_votes'] });
+      queryClient.invalidateQueries({ queryKey: ['standings_table'] });
+    } catch (err: any) {
+      alert(`Errore invio voti: ${err.message}`);
+    } finally {
+      setSubmittingVotes(false);
+    }
+  };
+
+  // Controlla se le votazioni sono ancora aperte (entro 2 ore)
+  const isVotingOpen = (match: any) => {
+    if (!match?.voting_deadline) return false;
+    return new Date(match.voting_deadline).getTime() > Date.now();
+  };
+
+  return (
+    <div className="space-y-5 pb-24 max-w-lg mx-auto">
+      {/* Header */}
+      <div className="border-b border-slate-800 pb-3">
+        <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
+          ALCI FUTSAL
+        </span>
+        <h1 className="font-bebas text-4xl text-white tracking-wider">PARTITE</h1>
+      </div>
+
+      {/* Switch Tab: IN PROGRAMMA / GIOCATE */}
+      <div className="grid grid-cols-2 bg-[#121721] p-1 rounded-2xl border border-slate-800 text-xs font-bebas">
+        <button
+          type="button"
+          onClick={() => {
+            setTab('scheduled');
+            setSelectedMatch(null);
+          }}
+          className={`py-2 rounded-xl transition tracking-wider ${
+            tab === 'scheduled'
+              ? 'bg-amber-400 text-slate-950 font-bold shadow'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          IN PROGRAMMA ({scheduledMatches.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setTab('completed');
+            setSelectedMatch(null);
+          }}
+          className={`py-2 rounded-xl transition tracking-wider ${
+            tab === 'completed'
+              ? 'bg-amber-400 text-slate-950 font-bold shadow'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          GIOCATE ({completedMatches.length})
+        </button>
+      </div>
+
+      {isLoading && (
+        <div className="text-center py-12 text-amber-400 font-bebas text-xl animate-pulse">
+          CARICAMENTO PARTITE...
+        </div>
+      )}
+
+      {/* LISTA: IN PROGRAMMA */}
+      {tab === 'scheduled' && !selectedMatch && (
+        <div className="space-y-4">
+          {scheduledMatches.length === 0 ? (
+            <div className="text-center py-10 bg-[#131926] border border-slate-800 rounded-2xl text-slate-500 text-xs italic">
+              Nessuna partita in programma al momento.
+            </div>
+          ) : (
+            scheduledMatches.map((m: any) => (
+              <div
+                key={m.id}
+                onClick={() => {
+                  setSelectedMatch(m);
+                  setScoreTeam1(m.score_team1 || 0);
+                  setScoreTeam2(m.score_team2 || 0);
+                }}
+                className="bg-[#131926] border border-[#20293d] rounded-2xl p-5 shadow-xl hover:border-amber-400 transition cursor-pointer space-y-3"
+              >
+                <div className="flex justify-between items-center text-xs">
+                  <span className="font-mono text-slate-400">
+                    {new Date(m.created_at).toLocaleDateString('it-IT')}
+                  </span>
+                  <span className="bg-amber-400/10 border border-amber-400/30 text-amber-400 text-[10px] font-bold px-2 py-0.5 rounded">
+                    DA GIOCARE
+                  </span>
+                </div>
+
+                <div className="flex justify-between items-center py-2 px-4 bg-[#0b0e14] rounded-xl border border-slate-800 text-center">
+                  <div className="flex-1">
+                    <span className="font-bold text-white block text-sm">Squadra 1</span>
+                    <span className="text-[10px] text-slate-400">
+                      {m.team1_players?.length || 5} giocatori
+                    </span>
+                  </div>
+                  <span className="font-bebas text-2xl text-amber-400 px-3">VS</span>
+                  <div className="flex-1">
+                    <span className="font-bold text-white block text-sm">Squadra 2</span>
+                    <span className="text-[10px] text-slate-400">
+                      {m.team2_players?.length || 5} giocatori
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-center text-[11px] text-amber-400 font-bold uppercase pt-1">
+                  👉 Tocca per inserire il risultato finale
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* SCHERMATA DETTAGLIO: INSERISCI RISULTATO (Se in programma) */}
+      {tab === 'scheduled' && selectedMatch && (
+        <div className="bg-[#131926] border border-[#20293d] rounded-2xl p-5 shadow-2xl space-y-5">
+          <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+            <h2 className="font-bebas text-2xl text-white">INSERISCI RISULTATO</h2>
+            <button
+              onClick={() => setSelectedMatch(null)}
+              className="text-slate-400 hover:text-white text-xs underline"
+            >
+              Indietro
+            </button>
+          </div>
+
+          {/* Form Inserimento Punteggio */}
+          <div className="grid grid-cols-3 items-center gap-3 bg-[#0b0e14] border border-slate-800 p-4 rounded-xl text-center">
+            <div>
+              <span className="font-bold text-white text-xs block mb-1">Squadra 1</span>
+              <input
+                type="number"
+                min="0"
+                value={scoreTeam1}
+                onChange={(e) => setScoreTeam1(Number(e.target.value))}
+                className="w-16 h-12 mx-auto text-center font-bebas text-3xl bg-[#141a27] border border-slate-700 text-white rounded-xl focus:border-amber-400 outline-none"
+              />
+            </div>
+
+            <span className="font-bebas text-2xl text-slate-500">-</span>
+
+            <div>
+              <span className="font-bold text-white text-xs block mb-1">Squadra 2</span>
+              <input
+                type="number"
+                min="0"
+                value={scoreTeam2}
+                onChange={(e) => setScoreTeam2(Number(e.target.value))}
+                className="w-16 h-12 mx-auto text-center font-bebas text-3xl bg-[#141a27] border border-slate-700 text-white rounded-xl focus:border-amber-400 outline-none"
+              />
+            </div>
+          </div>
+
+          <button
+            type="button"
+            disabled={savingScore}
+            onClick={() => handleSaveResult(selectedMatch)}
+            className="w-full py-3 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bebas text-lg rounded-xl font-bold transition shadow"
+          >
+            {savingScore ? 'SALVATAGGIO IN CORSO...' : 'CONFERMA E APRI VOTAZIONI (2 ORE)'}
+          </button>
+        </div>
+      )}
+
+      {/* LISTA: GIOCATE */}
+      {tab === 'completed' && !selectedMatch && (
+        <div className="space-y-4">
+          {completedMatches.length === 0 ? (
+            <div className="text-center py-10 bg-[#131926] border border-slate-800 rounded-2xl text-slate-500 text-xs italic">
+              Nessuna partita giocata registrata finora.
+            </div>
+          ) : (
+            completedMatches.map((m: any) => {
+              const votingActive = isVotingOpen(m);
+
+              return (
+                <div
+                  key={m.id}
+                  onClick={() => setSelectedMatch(m)}
+                  className="bg-[#131926] border border-[#20293d] rounded-2xl p-5 shadow-xl hover:border-slate-600 transition cursor-pointer space-y-3"
+                >
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-mono text-slate-400">
+                      {new Date(m.created_at).toLocaleDateString('it-IT')}
+                    </span>
+                    {votingActive ? (
+                      <span className="bg-emerald-950/60 border border-emerald-500/40 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded animate-pulse">
+                        VOTAZIONI ATTIVE
+                      </span>
+                    ) : (
+                      <span className="bg-slate-800 text-slate-400 text-[10px] font-bold px-2 py-0.5 rounded">
+                        CONCLUSA
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex justify-between items-center py-3 px-4 bg-[#0b0e14] rounded-xl border border-slate-800 text-center">
+                    <div className="flex-1 font-bold text-white text-sm">Squadra 1</div>
+                    <div className="font-bebas text-3xl text-amber-400 px-4">
+                      {m.score_team1} - {m.score_team2}
+                    </div>
+                    <div className="flex-1 font-bold text-white text-sm">Squadra 2</div>
+                  </div>
+
+                  <div className="text-center text-[11px] text-slate-400 pt-1">
+                    Tocca per visualizzare formazioni, pagelle e MVP
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {/* RESOCONTO PARTITA GIOCATA: SQUADRE + VOTAZIONI STELLE & MVP */}
+      {tab === 'completed' && selectedMatch && (
+        <div className="space-y-6">
+          <div className="bg-[#131926] border border-[#20293d] rounded-2xl p-5 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+              <h2 className="font-bebas text-2xl text-white">RESOCONTO PARTITA</h2>
+              <button
+                onClick={() => setSelectedMatch(null)}
+                className="text-slate-400 hover:text-white text-xs underline"
+              >
+                Indietro
+              </button>
+            </div>
+
+            {/* Punteggio */}
+            <div className="flex justify-between items-center py-3 px-4 bg-[#0b0e14] rounded-xl border border-slate-800 text-center">
+              <span className="flex-1 font-bold text-white text-sm">Squadra 1</span>
+              <span className="font-bebas text-4xl text-amber-400 px-4">
+                {selectedMatch.score_team1} - {selectedMatch.score_team2}
+              </span>
+              <span className="flex-1 font-bold text-white text-sm">Squadra 2</span>
+            </div>
+
+            {/* Formazioni affiancate */}
+            <div className="grid grid-cols-2 gap-4 text-xs">
+              <div className="bg-[#0b0e14] p-3 rounded-xl border border-slate-800 space-y-1.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">
+                  Squadra 1
+                </span>
+                {selectedMatch.team1_players?.map((p: any) => (
+                  <div key={p.id} className="text-white font-medium truncate">
+                    • {p.name}
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-[#0b0e14] p-3 rounded-xl border border-slate-800 space-y-1.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">
+                  Squadra 2
+                </span>
+                {selectedMatch.team2_players?.map((p: any) => (
+                  <div key={p.id} className="text-white font-medium truncate">
+                    • {p.name}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* BOX VOTAZIONI PARTECIPANTI (STELLE + MVP) */}
+          <div className="bg-[#131926] border border-[#20293d] rounded-2xl p-5 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+              <div>
+                <h3 className="font-bebas text-2xl text-white">PAGELLE & MVP</h3>
+                <span className="text-[11px] text-slate-400">
+                  {isVotingOpen(selectedMatch)
+                    ? '⭐ Vota a stelle ogni giocatore e scegli il tuo MVP'
+                    : '🔒 Votazioni chiuse (Medie ufficiali)'}
+                </span>
+              </div>
+
+              {isVotingOpen(selectedMatch) && (
+                <span className="bg-amber-400/10 border border-amber-400/30 text-amber-400 text-[10px] font-bold px-2 py-1 rounded">
+                  2 ORE ATTIVE
+                </span>
+              )}
+            </div>
+
+            {/* Tabella di Voto Allineata: Giocatore | Stelle | MVP */}
+            <div className="space-y-3">
+              {[
+                ...(selectedMatch.team1_players || []),
+                ...(selectedMatch.team2_players || []),
+              ]
+                .filter((p: any) => !p.is_dummy && !p.is_bot) // Solo umani
+                .map((player: any) => {
+                  const ratingVal = userRatings[player.id] || 0;
+                  const isMvpSelected = selectedMvp === player.id;
+                  const avgData = summaryVotes?.averages?.[player.id];
+
+                  return (
+                    <div
+                      key={player.id}
+                      className="flex items-center justify-between bg-[#0b0e14] border border-slate-800/80 p-3 rounded-xl"
+                    >
+                      {/* Nome Giocatore */}
+                      <div className="w-1/3 truncate">
+                        <span className="font-bold text-white text-sm block truncate">
+                          {player.name}
+                        </span>
+                        {avgData && (
+                          <span className="text-[10px] text-amber-400 font-mono">
+                            Media: {avgData.avg}/10 ({avgData.count})
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Voto a Stelle (Mezze stelle incluse) */}
+                      <div className="flex-1 flex justify-center">
+                        <StarRating
+                          value={ratingVal}
+                          onChange={(newVal) =>
+                            setUserRatings((prev) => ({ ...prev, [player.id]: newVal }))
+                          }
+                          disabled={!isVotingOpen(selectedMatch)}
+                        />
+                      </div>
+
+                      {/* Bottone MVP */}
+                      <div className="w-16 flex justify-end">
+                        <button
+                          type="button"
+                          disabled={!isVotingOpen(selectedMatch)}
+                          onClick={() => setSelectedMvp(player.id)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bebas tracking-wider transition ${
+                            isMvpSelected
+                              ? 'bg-amber-400 text-slate-950 font-bold shadow-md'
+                              : 'bg-[#151c28] text-slate-400 hover:text-white border border-slate-700'
+                          }`}
+                        >
+                          MVP
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+
+            {/* Tasto Invia Voto se votazione aperta */}
+            {isVotingOpen(selectedMatch) && (
+              <button
+                type="button"
+                disabled={submittingVotes}
+                onClick={handleSubmitVotes}
+                className="w-full py-3 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bebas text-lg rounded-xl font-bold transition shadow mt-3"
+              >
+                {submittingVotes ? 'INVIO DEI VOTI...' : 'SALVA LE MIE VALUTAZIONI'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
