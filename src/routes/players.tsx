@@ -3,238 +3,280 @@ import { createRoute } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Route as rootRoute } from './__root';
 import { supabase } from '../lib/actions';
-import { PlayerCard } from '../components/PlayerCard';
-import { ARCHETYPES, MainRole, generateAttributesFromOverall, calculateArchetypeOverall } from '../lib/engine';
+import { ARCHETYPES } from '../lib/engine';
 
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/players',
-  component: PlayersPage,
+  path: '/profile',
+  component: ProfilePage,
 });
 
-function PlayersPage() {
+function ProfilePage() {
   const queryClient = useQueryClient();
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [selectedPlayer, setSelectedPlayer] = useState<any | null>(null);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
-  const leagueId = typeof window !== 'undefined'
+  const activeLeagueId = typeof window !== 'undefined'
     ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
     : null;
 
+  const currentRole = typeof window !== 'undefined'
+    ? localStorage.getItem('alci_user_role') || 'member'
+    : 'member';
+
+  // Sincronizza l'utente sia al mount che al cambio di stato Auth
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) setCurrentUserId(user.id);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setCurrentUser(session.user);
+      }
+      setAuthLoading(false);
     });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCurrentUser(session?.user ?? null);
+      setAuthLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['players_all', leagueId],
+  // 1. Cerca il cartellino collegato all'utente nella lega attiva
+  const { data: myPlayer, isLoading: playerLoading, refetch: refetchMyPlayer } = useQuery({
+    queryKey: ['my_player_card', currentUser?.id, activeLeagueId],
+    enabled: Boolean(currentUser?.id),
+    queryFn: async () => {
+      if (!currentUser?.id) return null;
+
+      // Cerca per user_id e league_id
+      let query = supabase
+        .from('players')
+        .select('*')
+        .eq('user_id', currentUser.id);
+
+      if (activeLeagueId) {
+        query = query.eq('league_id', activeLeagueId);
+      }
+
+      const { data, error } = await query.maybeSingle();
+
+      if (error || !data) {
+        // Fallback: se user_id non era ancora salvato, cerca per email o nome utente se registrato
+        const userName = currentUser.user_metadata?.name || currentUser.user_metadata?.full_name;
+        if (userName) {
+          const { data: fallbackPlayer } = await supabase
+            .from('players')
+            .select('*')
+            .ilike('name', userName)
+            .maybeSingle();
+
+          if (fallbackPlayer) {
+            // Auto-associa l'id auth al player
+            await supabase.from('players').update({ user_id: currentUser.id }).eq('id', fallbackPlayer.id);
+            return fallbackPlayer;
+          }
+        }
+        return null;
+      }
+
+      return data;
+    },
+  });
+
+  // 2. Se non ha un cartellino associato, elenca i cartellini liberi della lega da rivendicare
+  const { data: unlinkedPlayers, refetch: refetchUnlinked } = useQuery({
+    queryKey: ['unlinked_players', activeLeagueId],
+    enabled: Boolean(!myPlayer) && Boolean(currentUser?.id),
     queryFn: async () => {
       let query = supabase.from('players').select('*');
-      if (leagueId) {
-        query = query.eq('league_id', leagueId);
+      if (activeLeagueId) {
+        query = query.eq('league_id', activeLeagueId);
       }
-      const res = await query.order('name');
-      if (res.error) throw new Error(res.error.message);
-      return res.data || [];
+      const { data, error } = await query.is('user_id', null).order('name');
+      if (error) return [];
+      return data || [];
     },
   });
 
-  const claimMutation = useMutation({
+  // 3. Mutazione per collegare manualmente il profilo al cartellino
+  const linkPlayerMutation = useMutation({
     mutationFn: async (playerId: string) => {
-      if (!currentUserId) throw new Error('Devi effettuare il login per collegare il profilo.');
-      
-      const { error: rpcError } = await supabase.rpc('claim_player', {
-        p_player_id: playerId,
-        p_user_id: currentUserId,
-      });
+      if (!currentUser?.id) throw new Error('Utente non autenticato');
+      const { error } = await supabase
+        .from('players')
+        .update({ user_id: currentUser.id, is_dummy: false })
+        .eq('id', playerId);
 
-      if (rpcError) {
-        const { error: updateError } = await supabase
-          .from('players')
-          .update({ user_id: currentUserId, is_dummy: false })
-          .eq('id', playerId);
-        if (updateError) throw updateError;
-      }
+      if (error) throw error;
     },
     onSuccess: () => {
-      alert('Profilo collegato con successo!');
-      setSelectedPlayer(null);
-      refetch();
-      queryClient.invalidateQueries({ queryKey: ['players_all'] });
+      alert('Cartellino collegato con successo!');
+      refetchMyPlayer();
+      refetchUnlinked();
+      queryClient.invalidateQueries();
     },
-    onError: (err: any) => {
-      alert(`Errore claim: ${err.message}`);
-    },
+    onError: (err: any) => alert(`Errore collegamento: ${err.message}`),
   });
 
-  if (isLoading) {
+  const archDef = myPlayer ? ARCHETYPES[myPlayer.archetype] : null;
+
+  if (authLoading) {
     return (
-      <div className="p-8 text-center text-amber-400 font-bebas text-xl animate-pulse">
-        CARICAMENTO PLAYERS IN CORSO...
+      <div className="text-center py-12 text-amber-400 font-bebas text-xl tracking-wider">
+        CARICAMENTO PROFILO...
       </div>
     );
   }
 
-  const playersList = data || [];
-
   return (
-    <div className="p-4 space-y-4 pb-24 max-w-2xl mx-auto">
-      {/* Header */}
-      <div className="border-b border-[#222c42] pb-3 flex justify-between items-end">
-        <div>
-          <h1 className="font-bebas text-3xl text-slate-100">PLAYERS</h1>
-          <p className="text-xs text-slate-400">Tocca una carta per visualizzare dettagli o riscattarla</p>
+    <div className="space-y-6 pb-20 max-w-md mx-auto">
+      {/* 1. Box Dati Utente */}
+      <div className="bg-[#121721] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
+        <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+          <div>
+            <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
+              ACCOUNT PERSONALE
+            </span>
+            <h1 className="font-bebas text-3xl text-slate-100">PROFILO</h1>
+          </div>
+          <span className="text-xs font-bold font-mono px-2 py-1 rounded bg-amber-400/10 text-amber-400 border border-amber-400/20 uppercase">
+            {currentRole === 'admin' ? 'Admin' : 'Giocatore'}
+          </span>
         </div>
-        <button
-          onClick={() => refetch()}
-          className="font-bebas text-amber-400 text-sm bg-[#151b28] px-3 py-1 rounded-lg border border-[#222c42] hover:border-amber-400 transition"
-        >
-          AGGIORNA ({playersList.length})
-        </button>
+
+        <div className="bg-[#0b0e14] border border-[#222c42] p-3 rounded-xl space-y-1.5 text-xs">
+          <div className="flex justify-between items-center">
+            <span className="text-slate-400">Email:</span>
+            <span className="font-mono text-slate-200 font-medium truncate max-w-[200px]">
+              {currentUser?.email || 'Nessuna email registrata'}
+            </span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-slate-400">Nome / Username:</span>
+            <span className="font-semibold text-slate-100">
+              {currentUser?.user_metadata?.name ||
+                currentUser?.user_metadata?.full_name ||
+                myPlayer?.name ||
+                currentUser?.email?.split('@')[0] ||
+                'Utente ALCI'}
+            </span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-slate-400">ID Account:</span>
+            <span className="font-mono text-[10px] text-slate-400">
+              {currentUser?.id ? currentUser.id.slice(0, 10) + '...' : 'N/D'}
+            </span>
+          </div>
+        </div>
       </div>
 
-      {error && (
-        <div className="p-3 rounded-lg bg-red-950/70 border border-red-700 text-red-200 text-xs">
-          <strong>Errore:</strong> {(error as any).message}
-        </div>
-      )}
+      {/* 2. Cartellino FUT Giocatore */}
+      {playerLoading ? (
+        <div className="text-center text-xs text-slate-500 py-6">Caricamento cartellino...</div>
+      ) : myPlayer ? (
+        <div className="space-y-3">
+          <div className="flex justify-between items-center">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+              La Tua Carta Ufficiale
+            </span>
+            <span className="text-[10px] text-lime-400 font-bold bg-lime-400/10 border border-lime-400/20 px-2 py-0.5 rounded">
+              COLLEGATA ✓
+            </span>
+          </div>
 
-      {playersList.length === 0 ? (
-        <div className="bg-[#151b28] border border-[#222c42] rounded-xl p-8 text-center space-y-3">
-          <p className="font-bebas text-xl text-slate-300">NESSUNA CARTA TROVATA</p>
-          <p className="text-xs text-slate-400">Nessun giocatore registrato in questa lega.</p>
+          <div className="relative overflow-hidden rounded-2xl border-2 border-amber-400/60 bg-gradient-to-b from-[#1e273a] via-[#121721] to-[#0b0e14] p-5 shadow-2xl space-y-4">
+            <div className="flex justify-between items-start">
+              <div>
+                <span className="font-bebas text-6xl text-amber-400 leading-none block">
+                  {myPlayer.overall || 70}
+                </span>
+                <span className="font-bebas text-2xl text-slate-200 tracking-wider">
+                  {myPlayer.role || 'ATT'}
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400 block">
+                  ARCHETIPO
+                </span>
+                <span className="font-bebas text-lg text-lime-400">
+                  {archDef ? archDef.name : myPlayer.archetype || 'Universale'}
+                </span>
+              </div>
+            </div>
+
+            <div className="text-center py-2 border-y border-slate-800">
+              <h2 className="font-bebas text-3xl text-slate-100 tracking-wide uppercase">
+                {myPlayer.name}
+              </h2>
+              <span className="text-[11px] text-slate-400 font-mono">
+                {archDef?.weightsSummary || 'Bilanciato'}
+              </span>
+            </div>
+
+            {/* Statistiche Archetipo */}
+            <div className="grid grid-cols-3 gap-2 text-center">
+              {myPlayer.attributes &&
+                Object.entries(myPlayer.attributes).map(([stat, val]: any) => (
+                  <div key={stat} className="bg-[#0b0e14]/80 border border-slate-800 p-2 rounded-xl">
+                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      {stat}
+                    </span>
+                    <span className="font-bebas text-2xl text-amber-300 font-bold">{val}</span>
+                  </div>
+                ))}
+            </div>
+
+            <div className="flex justify-between items-center text-[11px] text-slate-400 pt-1 border-t border-slate-800/80">
+              <span>Intesa: <strong className="text-slate-200">{myPlayer.teamwork || 'Medio'}</strong></span>
+              <span>In Porta: <strong className="text-slate-200">{myPlayer.gk_efficiency || 'Media'}</strong></span>
+            </div>
+          </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {playersList.map((p: any) => {
-            const archKey = p.archetype || 'ATT_BOMBER';
-            const archDef = ARCHETYPES[archKey];
-            const roleCode: MainRole = (p.role as MainRole) || archDef?.role || 'ATT';
-            const isGk = roleCode === 'POR';
+        /* Caso: Non ancora collegato */
+        <div className="bg-[#121721] border border-amber-400/40 rounded-2xl p-5 shadow-xl space-y-4">
+          <div>
+            <span className="bg-amber-400/10 text-amber-400 border border-amber-400/20 text-[10px] font-bold uppercase px-2 py-0.5 rounded tracking-wider">
+              NESSUN CARTELLINO COLLEGATO
+            </span>
+            <h2 className="font-bebas text-2xl text-slate-100 mt-2">COLLEGA IL TUO PROFILO</h2>
+            <p className="text-xs text-slate-400">
+              Seleziona il tuo nome dalla rosa per associare la tua carta giocatore a questo account:
+            </p>
+          </div>
 
-            // Recupera gli attributi salvati, o fallback generati partendo dall'overall
-            const playerAttrs = p.attributes && Object.keys(p.attributes).length > 0
-              ? p.attributes
-              : generateAttributesFromOverall(archKey, p.overall || 70);
-
-            const calculatedOvr = p.overall ?? calculateArchetypeOverall(archKey, playerAttrs);
-
-            const cardInput: any = {
-              id: p.id,
-              nickname: p.name || 'Giocatore',
-              role: roleCode,
-              archetype: archKey,
-              overall: calculatedOvr,
-              isEligible: true,
-              isGuest: Boolean(p.is_dummy),
-              matchesPlayed: p.matches_played || 0,
-              wins: p.wins || 0,
-              draws: p.draws || 0,
-              losses: p.losses || 0,
-              mvpCount: p.mvp_count || 0,
-              consecutiveAbsences: 0,
-              currentFormModifier: 0,
-              teamworkTendency: p.teamwork || 'Medio',
-              gkEfficiency: p.gk_efficiency || (isGk ? 'Alta' : 'Media'),
-              attributes: playerAttrs,
-            };
-
-            return (
-              <div
-                key={p.id}
-                onClick={() => setSelectedPlayer({ ...p, cardData: cardInput })}
-                className="cursor-pointer transition-transform active:scale-95"
-              >
-                <PlayerCard player={cardInput} />
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Modal Dettagli / Claim (SENZA NUMERO DI MAGLIA) */}
-      {selectedPlayer && (
-        <div 
-          className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 z-50"
-          onClick={() => setSelectedPlayer(null)}
-        >
-          <div 
-            className="bg-[#151b28] border border-[#222c42] rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex justify-between items-start border-b border-[#222c42] pb-3">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-bold text-amber-400 tracking-wider uppercase">
-                    {selectedPlayer.cardData?.role || selectedPlayer.role || 'ATT'}
-                  </span>
-                  <span className="text-slate-500">•</span>
-                  <span className="text-xs text-slate-300 font-semibold">
-                    {ARCHETYPES[selectedPlayer.archetype]?.name || selectedPlayer.archetype || 'Archetipo'}
-                  </span>
-                </div>
-                <h3 className="font-bebas text-3xl text-slate-100 leading-tight">
-                  {selectedPlayer.name}
-                </h3>
-                <span className={`inline-block mt-1 px-2 py-0.5 rounded text-[10px] uppercase font-bold ${
-                  selectedPlayer.is_dummy ? 'bg-amber-900/60 text-amber-300' : 'bg-emerald-900/60 text-emerald-300'
-                }`}>
-                  {selectedPlayer.is_dummy ? 'Profilo Fittizio' : 'Giocatore Registrato'}
-                </span>
-              </div>
-              <button
-                onClick={() => setSelectedPlayer(null)}
-                className="w-8 h-8 rounded-full bg-[#0b0e14] border border-[#222c42] text-slate-400 hover:text-white flex items-center justify-center font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="bg-[#0b0e14] border border-[#222c42] p-2.5 rounded-lg">
-                <span className="text-slate-500 uppercase text-[10px] block">Overall Effettivo</span>
-                <span className="text-amber-400 font-bebas text-xl">
-                  {selectedPlayer.cardData?.overall || selectedPlayer.overall || 70}
-                </span>
-              </div>
-              <div className="bg-[#0b0e14] border border-[#222c42] p-2.5 rounded-lg">
-                <span className="text-slate-500 uppercase text-[10px] block">Piede Preferito</span>
-                <span className="text-slate-200 font-semibold mt-1 block">
-                  {selectedPlayer.preferred_foot || 'Destro'}
-                </span>
-              </div>
-              <div className="bg-[#0b0e14] border border-[#222c42] p-2.5 rounded-lg">
-                <span className="text-slate-500 uppercase text-[10px] block">Gioco di Squadra</span>
-                <span className="text-slate-200 font-semibold">{selectedPlayer.teamwork || 'Medio'}</span>
-              </div>
-              <div className="bg-[#0b0e14] border border-[#222c42] p-2.5 rounded-lg">
-                <span className="text-slate-500 uppercase text-[10px] block">Efficacia Portiere</span>
-                <span className="text-slate-200 font-semibold">{selectedPlayer.gk_efficiency || 'Media'}</span>
-              </div>
-            </div>
-
-            {selectedPlayer.is_dummy && (
-              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-2">
-                <p className="text-xs text-amber-300 text-center font-medium">
-                  Questo profilo è libero. Vuoi collegarlo al tuo account?
-                </p>
-                <button
-                  disabled={claimMutation.isPending}
-                  onClick={() => claimMutation.mutate(selectedPlayer.id)}
-                  className="w-full py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bebas text-lg rounded-xl tracking-wider shadow-lg transition disabled:opacity-50 font-bold"
+          <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+            {unlinkedPlayers && unlinkedPlayers.length > 0 ? (
+              unlinkedPlayers.map((p: any) => (
+                <div
+                  key={p.id}
+                  className="flex justify-between items-center bg-[#0b0e14] border border-[#222c42] p-2.5 rounded-xl text-xs"
                 >
-                  {claimMutation.isPending ? 'COLLEGAMENTO...' : 'COLLEGA AL MIO ACCOUNT'}
-                </button>
-              </div>
+                  <div>
+                    <span className="font-bold text-slate-100 block text-sm">{p.name}</span>
+                    <span className="text-[10px] text-slate-400">
+                      {p.role} • OVR {p.overall}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={linkPlayerMutation.isPending}
+                    onClick={() => {
+                      if (confirm(`Confermi di voler collegare "${p.name}" al tuo account?`)) {
+                        linkPlayerMutation.mutate(p.id);
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bebas text-sm rounded-lg font-bold transition shadow"
+                  >
+                    COLLEGA
+                  </button>
+                </div>
+              ))
+            ) : (
+              <p className="text-xs text-slate-500 italic py-3 text-center">
+                Nessun cartellino libero disponibile. Chiedi all'admin di aggiungerti nella rosa dei giocatori.
+              </p>
             )}
-
-            <button
-              onClick={() => setSelectedPlayer(null)}
-              className="w-full py-2 bg-[#0b0e14] text-slate-400 font-semibold text-xs rounded-xl hover:text-white transition"
-            >
-              Chiudi
-            </button>
           </div>
         </div>
       )}
