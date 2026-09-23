@@ -1,12 +1,9 @@
 import React, { useState } from 'react';
-import { createRoute, Link } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { Route as rootRoute } from './__root';
 import { supabase } from '../lib/actions';
 
-export const Route = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/',
+export const Route = createFileRoute('/')({
   component: HomePage,
 });
 
@@ -42,7 +39,7 @@ function HomePage() {
     refetchInterval: 30000,
   });
 
-  // 2. Sondaggi: query protetta da polls
+  // 2. Sondaggi attivi dalla tabella polls
   const { data: activePolls = [] } = useQuery({
     queryKey: ['active_polls_home', activeLeagueId],
     queryFn: async () => {
@@ -89,30 +86,27 @@ function HomePage() {
 
   return (
     <div className="space-y-6 pb-24 max-w-lg mx-auto">
-      {/* Banner Titolo con colore di test ciano */}
+      {/* Banner Titolo */}
       <div className="border-b border-slate-800 pb-3">
-        <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider block">
+        <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
           CENTRO SPORTIVO
         </span>
         <h1 className="font-bebas text-4xl text-white tracking-wider">HUB PRINCIPALE</h1>
       </div>
 
-      {/* WIDGET PRIORITARIO: VOTAZIONI ATTIVE PER 2 ORE */}
-      {activeVotingMatch && (
+      {/* WIDGET MVP */}
+      {activeVotingMatch && activeVotingMatch.voting_deadline && (
         <div className="bg-gradient-to-r from-amber-500/20 via-[#151c28] to-amber-500/10 border border-amber-400/60 rounded-2xl p-5 shadow-2xl space-y-3">
           <div className="flex justify-between items-center">
             <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5 animate-pulse">
               <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
               VOTAZIONI ATTIVE (2 ORE)
             </span>
-            <span className="text-xs font-mono text-slate-300">
-              Scade alle: {new Date(activeVotingMatch.voting_deadline).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
-            </span>
           </div>
 
           <div>
             <h2 className="font-bebas text-2xl text-white tracking-wide">
-              PAGELLE & MVP: {activeVotingMatch.score_team1} - {activeVotingMatch.score_team2}
+              PAGELLE & MVP: {activeVotingMatch.score_team1 ?? 0} - {activeVotingMatch.score_team2 ?? 0}
             </h2>
             <p className="text-xs text-slate-300">
               Inserisci i tuoi voti a stelle e vota il migliore in campo della partita appena conclusa.
@@ -128,7 +122,7 @@ function HomePage() {
         </div>
       )}
 
-      {/* CARD UNICA COMPATTA: CONVOCAZIONI & SONDAGGI */}
+      {/* CARD CONVOCAZIONI & SONDAGGI */}
       {Array.isArray(activePolls) && activePolls.length > 0 && (
         <div className="bg-[#131926] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
           <div className="flex justify-between items-center border-b border-slate-800/80 pb-2">
@@ -193,7 +187,6 @@ function HomePage() {
                     </span>
                   </button>
 
-                  {/* Espansione orari */}
                   {isSelected && (
                     <div className="px-3.5 pb-3.5 pt-2 border-t border-slate-700/60 space-y-3 bg-[#121824]">
                       <div>
@@ -227,7 +220,7 @@ function HomePage() {
         </div>
       )}
 
-      {/* WIDGET PROSSIMA PARTITA IN PROGRAMMA */}
+      {/* PROSSIMA PARTITA */}
       {upcomingMatch && (
         <div className="bg-[#131926] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
