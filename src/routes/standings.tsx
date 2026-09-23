@@ -31,12 +31,13 @@ function StandingsPage() {
     },
   });
 
-  // 2. Recupera tutti i giocatori della lega (anche a 0 presenze)
+  // 2. Recupera tutti i giocatori della lega e calcola dalle partite giocate
   const { data: standings, isLoading } = useQuery({
     queryKey: ['standings_table', activeLeagueId],
     queryFn: async () => {
       if (!activeLeagueId) return [];
 
+      // A. Tutti i giocatori della rosa
       const { data: players, error } = await supabase
         .from('players')
         .select('*')
@@ -44,25 +45,80 @@ function StandingsPage() {
 
       if (error || !players) return [];
 
+      // B. Tutte le partite concluse
+      const { data: matches } = await supabase
+        .from('matches')
+        .select('*')
+        .eq('league_id', activeLeagueId)
+        .eq('status', 'completed');
+
+      // Mappa statistiche inizializzata a 0 per tutti
+      const stats: Record<string, { pg: number; v: number; p: number; s: number; mvp: number }> = {};
+      players.forEach((p: any) => {
+        stats[p.id] = { pg: 0, v: 0, p: 0, s: 0, mvp: Number(p.mvp_count || 0) };
+      });
+
+      // Se ci sono partite registrate, calcola presenze, esiti e punti
+      if (matches && matches.length > 0) {
+        matches.forEach((m: any) => {
+          const s1 = Number(m.score_team1 ?? 0);
+          const s2 = Number(m.score_team2 ?? 0);
+          const isDraw = s1 === s2;
+          const t1Won = s1 > s2;
+          const t2Won = s2 > s1;
+
+          (m.team1_players || []).forEach((p: any) => {
+            if (p?.id && stats[p.id]) {
+              stats[p.id].pg += 1;
+              if (isDraw) stats[p.id].p += 1;
+              else if (t1Won) stats[p.id].v += 1;
+              else stats[p.id].s += 1;
+            }
+          });
+
+          (m.team2_players || []).forEach((p: any) => {
+            if (p?.id && stats[p.id]) {
+              stats[p.id].pg += 1;
+              if (isDraw) stats[p.id].p += 1;
+              else if (t2Won) stats[p.id].v += 1;
+              else stats[p.id].s += 1;
+            }
+          });
+
+          if (m.mvp_player_id && stats[m.mvp_player_id]) {
+            stats[m.mvp_player_id].mvp += 1;
+          }
+        });
+      }
+
       const rows = players.map((p: any) => {
-        const pg = Number(p.matches_played || 0);
-        const v = Number(p.wins || 0);
-        const p_draw = Number(p.draws || 0);
-        const s = Number(p.losses || Math.max(0, pg - v - p_draw));
-        const mvp = Number(p.mvp_count || 0);
-        const punti = (v * 3) + (p_draw * 1);
+        const s = stats[p.id] || { pg: 0, v: 0, p: 0, s: 0, mvp: 0 };
+        const punti = (s.v * 3) + (s.p * 1);
 
         return {
           id: p.id,
           name: p.name,
-          pg,
-          v,
-          p: p_draw,
-          s,
-          mvp,
+          pg: s.pg,
+          v: s.v,
+          p: s.p,
+          s: s.s,
+          mvp: s.mvp,
           punti,
         };
       });
+
+      // Ordinamento: Punti DESC, Vittorie DESC, MVP DESC, PG ASC, Nome ASC
+      rows.sort((a, b) => {
+        if (b.punti !== a.punti) return b.punti - a.punti;
+        if (b.v !== a.v) return b.v - a.v;
+        if (b.mvp !== a.mvp) return b.mvp - a.mvp;
+        return a.pg - b.pg;
+      });
+
+      return rows;
+    },
+  });
+
 
       // Ordinamento: Punti DESC, Vittorie DESC, MVP DESC, PG ASC, Nome ASC
       rows.sort((a, b) => {
