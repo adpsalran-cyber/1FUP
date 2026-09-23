@@ -122,6 +122,7 @@ function MatchesPage() {
   const [scoreTeam1, setScoreTeam1] = useState<number>(0);
   const [scoreTeam2, setScoreTeam2] = useState<number>(0);
   const [savingScore, setSavingScore] = useState(false);
+  const [deletingMatchId, setDeletingMatchId] = useState<string | null>(null);
 
   // Stato Voti Locali per la partita selezionata
   const [userRatings, setUserRatings] = useState<Record<string, number>>({});
@@ -138,12 +139,11 @@ function MatchesPage() {
   const { data: matches, isLoading } = useQuery({
     queryKey: ['matches_list', activeLeagueId],
     queryFn: async () => {
-      if (!activeLeagueId) return [];
-      const { data, error } = await supabase
-        .from('matches')
-        .select('*')
-        .eq('league_id', activeLeagueId)
-        .order('created_at', { ascending: false });
+      let query = supabase.from('matches').select('*').order('created_at', { ascending: false });
+      if (activeLeagueId) {
+        query = query.or(`league_id.eq.${activeLeagueId},league_id.is.null`);
+      }
+      const { data, error } = await query;
       if (error) return [];
       return data || [];
     },
@@ -265,6 +265,37 @@ function MatchesPage() {
       alert(`Errore salvataggio risultato: ${err.message}`);
     } finally {
       setSavingScore(false);
+    }
+  };
+
+  // Eliminazione partita da Admin
+  const handleDeleteMatch = async (matchId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+
+    const confirmed = window.confirm(
+      'Sei sicuro di voler eliminare questa partita? Verranno rimossi i punti, le presenze e i dati associati dalla classifica.'
+    );
+    if (!confirmed) return;
+
+    setDeletingMatchId(matchId);
+    try {
+      await supabase.from('match_ratings').delete().eq('match_id', matchId);
+      await supabase.from('match_mvp_votes').delete().eq('match_id', matchId);
+
+      const { error } = await supabase.from('matches').delete().eq('id', matchId);
+      if (error) throw error;
+
+      alert('Partita eliminata. La classifica è stata ricalcolata.');
+      queryClient.invalidateQueries({ queryKey: ['matches_list'] });
+      queryClient.invalidateQueries({ queryKey: ['standings_table'] });
+
+      if (selectedMatch?.id === matchId) {
+        setSelectedMatch(null);
+      }
+    } catch (err: any) {
+      alert(`Errore eliminazione partita: ${err.message}`);
+    } finally {
+      setDeletingMatchId(null);
     }
   };
 
@@ -413,9 +444,22 @@ function MatchesPage() {
                   <span className="font-mono text-slate-400">
                     {new Date(m.created_at).toLocaleDateString('it-IT')}
                   </span>
-                  <span className="bg-amber-400/10 border border-amber-400/30 text-amber-400 text-[10px] font-bold px-2 py-0.5 rounded">
-                    DA GIOCARE
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="bg-amber-400/10 border border-amber-400/30 text-amber-400 text-[10px] font-bold px-2 py-0.5 rounded">
+                      DA GIOCARE
+                    </span>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteMatch(m.id, e)}
+                        disabled={deletingMatchId === m.id}
+                        className="text-rose-400 hover:text-rose-300 p-1 rounded bg-rose-500/10 border border-rose-500/20 text-[10px] font-bold transition"
+                        title="Elimina partita"
+                      >
+                        {deletingMatchId === m.id ? '...' : '✕'}
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex justify-between items-center py-2 px-4 bg-[#0b0e14] rounded-xl border border-slate-800 text-center">
@@ -482,14 +526,28 @@ function MatchesPage() {
             </div>
           </div>
 
-          <button
-            type="button"
-            disabled={savingScore}
-            onClick={() => handleSaveResult(selectedMatch)}
-            className="w-full py-3 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bebas text-lg rounded-xl font-bold transition shadow"
-          >
-            {savingScore ? 'SALVATAGGIO IN CORSO...' : 'CONFERMA E APRI VOTAZIONI (2 ORE)'}
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={savingScore}
+              onClick={() => handleSaveResult(selectedMatch)}
+              className="flex-1 py-3 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bebas text-lg rounded-xl font-bold transition shadow"
+            >
+              {savingScore ? 'SALVATAGGIO IN CORSO...' : 'CONFERMA E APRI VOTAZIONI (2 ORE)'}
+            </button>
+
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => handleDeleteMatch(selectedMatch.id)}
+                disabled={deletingMatchId === selectedMatch.id}
+                className="px-4 py-3 bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 font-bebas text-sm rounded-xl transition"
+                title="Elimina partita"
+              >
+                ELIMINA
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -514,15 +572,29 @@ function MatchesPage() {
                     <span className="font-mono text-slate-400">
                       {new Date(m.created_at).toLocaleDateString('it-IT')}
                     </span>
-                    {votingActive ? (
-                      <span className="bg-emerald-950/60 border border-emerald-500/40 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded animate-pulse">
-                        VOTAZIONI ATTIVE
-                      </span>
-                    ) : (
-                      <span className="bg-slate-800 text-slate-400 text-[10px] font-bold px-2 py-0.5 rounded">
-                        CONCLUSA
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {votingActive ? (
+                        <span className="bg-emerald-950/60 border border-emerald-500/40 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded animate-pulse">
+                          VOTAZIONI ATTIVE
+                        </span>
+                      ) : (
+                        <span className="bg-slate-800 text-slate-400 text-[10px] font-bold px-2 py-0.5 rounded">
+                          CONCLUSA
+                        </span>
+                      )}
+
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteMatch(m.id, e)}
+                          disabled={deletingMatchId === m.id}
+                          className="text-rose-400 hover:text-rose-300 px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 text-[10px] font-bold transition hover:bg-rose-500/20"
+                          title="Elimina partita e aggiorna classifica"
+                        >
+                          {deletingMatchId === m.id ? '...' : 'ELIMINA'}
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex justify-between items-center py-3 px-4 bg-[#0b0e14] rounded-xl border border-slate-800 text-center">
@@ -549,12 +621,24 @@ function MatchesPage() {
           <div className="bg-[#131926] border border-[#20293d] rounded-2xl p-5 shadow-2xl space-y-4">
             <div className="flex justify-between items-center border-b border-slate-800 pb-2">
               <h2 className="font-bebas text-2xl text-white">RESOCONTO PARTITA</h2>
-              <button
-                onClick={() => setSelectedMatch(null)}
-                className="text-slate-400 hover:text-white text-xs underline"
-              >
-                Indietro
-              </button>
+              <div className="flex items-center gap-3">
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteMatch(selectedMatch.id)}
+                    disabled={deletingMatchId === selectedMatch.id}
+                    className="text-rose-400 hover:text-rose-300 text-xs font-bold uppercase px-2.5 py-1 rounded bg-rose-500/10 border border-rose-500/30 transition"
+                  >
+                    {deletingMatchId === selectedMatch.id ? 'ELIMINAZIONE...' : '🗑️ ELIMINA'}
+                  </button>
+                )}
+                <button
+                  onClick={() => setSelectedMatch(null)}
+                  className="text-slate-400 hover:text-white text-xs underline"
+                >
+                  Indietro
+                </button>
+              </div>
             </div>
 
             <div className="flex justify-between items-center py-3 px-4 bg-[#0b0e14] rounded-xl border border-slate-800 text-center">
