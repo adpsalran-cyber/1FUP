@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/actions';
-import { ARCHETYPES } from '../lib/engine';
+import { PlayerCard } from '../routes/players';
 
 interface ProfileViewProps {
   onClose?: () => void;
@@ -92,13 +92,11 @@ export function ProfileView({ onClose }: ProfileViewProps) {
     }
   };
 
-  const archDef = myPlayer ? ARCHETYPES[myPlayer.archetype] : null;
-
   return (
-    <div className="space-y-6 pb-6 max-w-md mx-auto">
+    <div className="space-y-6 pb-20 max-w-md mx-auto">
       {/* Box Account Utente */}
-      <div className="bg-[#121721] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
-        <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+      <div className="bg-[#131926] border border-[#1e2738] rounded-2xl p-5 shadow-xl space-y-3">
+        <div className="flex justify-between items-center border-b border-[#1e2738] pb-2">
           <div>
             <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
               ACCOUNT PERSONALE
@@ -106,7 +104,7 @@ export function ProfileView({ onClose }: ProfileViewProps) {
             <h1 className="font-bebas text-3xl text-slate-100">PROFILO</h1>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold font-mono px-2 py-1 rounded bg-amber-400/10 text-amber-400 border border-amber-400/20 uppercase">
+            <span className="text-xs font-bold font-mono px-2 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700 uppercase">
               {userRole === 'admin' ? 'Admin' : 'Giocatore'}
             </span>
             {onClose && (
@@ -121,11 +119,11 @@ export function ProfileView({ onClose }: ProfileViewProps) {
           </div>
         </div>
 
-        <div className="bg-[#0b0e14] border border-[#222c42] p-3 rounded-xl space-y-1.5 text-xs">
+        <div className="bg-[#0b0e14] border border-[#1e2738] p-3 rounded-xl space-y-1.5 text-xs">
           <div className="flex justify-between items-center">
             <span className="text-slate-400">Email:</span>
             <span className="font-mono text-slate-200 font-medium truncate max-w-[200px]">
-              {currentUser?.email || 'Nessuna email trovata'}
+              {currentUser?.email || 'Nessuna email'}
             </span>
           </div>
           <div className="flex justify-between items-center">
@@ -146,70 +144,25 @@ export function ProfileView({ onClose }: ProfileViewProps) {
         </div>
       )}
 
-      {/* Carta Ufficiale Collegata */}
+      {/* Carta Giocatore Collegata: STESSO IDENTICO STILE SENZA BORDI DORATI */}
       {!loading && myPlayer && (
         <div className="space-y-3">
-          <div className="flex justify-between items-center">
+          <div className="flex justify-between items-center px-1">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
               La Tua Carta Ufficiale
             </span>
-            <span className="text-[10px] text-lime-400 font-bold bg-lime-400/10 border border-lime-400/20 px-2 py-0.5 rounded">
+            <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded">
               COLLEGATO ✓
             </span>
           </div>
 
-          <div className="relative overflow-hidden rounded-2xl border-2 border-amber-400/60 bg-gradient-to-b from-[#1e273a] via-[#121721] to-[#0b0e14] p-5 shadow-2xl space-y-4">
-            <div className="flex justify-between items-start">
-              <div>
-                <span className="font-bebas text-6xl text-amber-400 leading-none block">
-                  {myPlayer.overall || 70}
-                </span>
-                <span className="font-bebas text-2xl text-slate-200 tracking-wider">
-                  {myPlayer.role || 'ATT'}
-                </span>
-              </div>
-              <div className="text-right">
-                <span className="text-[9px] uppercase font-bold tracking-widest text-slate-400 block">
-                  ARCHETIPO
-                </span>
-                <span className="font-bebas text-lg text-lime-400">
-                  {archDef ? archDef.name : myPlayer.archetype || 'Universale'}
-                </span>
-              </div>
-            </div>
-
-            <div className="text-center py-2 border-y border-slate-800">
-              <h2 className="font-bebas text-3xl text-slate-100 tracking-wide uppercase">
-                {myPlayer.name}
-              </h2>
-              <span className="text-[11px] text-slate-400 font-mono">
-                {archDef?.weightsSummary || 'Bilanciato'}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 text-center">
-              {myPlayer.attributes &&
-                Object.entries(myPlayer.attributes).map(([stat, val]: any) => (
-                  <div key={stat} className="bg-[#0b0e14]/80 border border-slate-800 p-2 rounded-xl">
-                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      {stat}
-                    </span>
-                    <span className="font-bebas text-2xl text-amber-300 font-bold">{val}</span>
-                  </div>
-                ))}
-            </div>
-
-            <div className="flex justify-between items-center text-[11px] text-slate-400 pt-1 border-t border-slate-800/80">
-              <span>Intesa: <strong className="text-slate-200">{myPlayer.teamwork || 'Medio'}</strong></span>
-              <span>In Porta: <strong className="text-slate-200">{myPlayer.gk_efficiency || 'Media'}</strong></span>
-            </div>
-          </div>
+          <PlayerCard player={myPlayer} />
         </div>
       )}
 
-      {/* Seleziona Cartellino Libero */}
+      {/* Selezione Cartellino Libero */}
       {!loading && !myPlayer && (
-        <div className="bg-[#121721] border border-amber-400/40 rounded-2xl p-5 shadow-xl space-y-4">
+        <div className="bg-[#131926] border border-[#1e2738] rounded-2xl p-5 shadow-xl space-y-4">
           <div>
             <span className="bg-amber-400/10 text-amber-400 border border-amber-400/20 text-[10px] font-bold uppercase px-2 py-0.5 rounded tracking-wider">
               CARTELLINO NON COLLEGATO
@@ -225,7 +178,7 @@ export function ProfileView({ onClose }: ProfileViewProps) {
               availablePlayers.map((p: any) => (
                 <div
                   key={p.id}
-                  className="flex justify-between items-center bg-[#0b0e14] border border-[#222c42] p-2.5 rounded-xl text-xs"
+                  className="flex justify-between items-center bg-[#0b0e14] border border-[#1e2738] p-2.5 rounded-xl text-xs"
                 >
                   <div>
                     <span className="font-bold text-slate-100 block text-sm">{p.name}</span>
