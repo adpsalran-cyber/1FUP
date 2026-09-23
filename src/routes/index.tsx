@@ -42,7 +42,7 @@ function HomePage() {
     refetchInterval: 30000,
   });
 
-  // 2. Sondaggi: query elementare senza filtri complessi
+  // 2. Sondaggi: query protetta da polls
   const { data: activePolls = [] } = useQuery({
     queryKey: ['active_polls_home', activeLeagueId],
     queryFn: async () => {
@@ -150,7 +150,7 @@ function HomePage() {
           </p>
 
           <div className="space-y-2">
-            {activePolls.map((poll: any) => {
+            {activePolls.map((poll: any, index: number) => {
               const isSelected = selectedPollId === poll?.id;
               const slots: string[] = Array.isArray(poll?.time_slots) && poll.time_slots.length > 0
                 ? poll.time_slots
@@ -158,7 +158,7 @@ function HomePage() {
 
               return (
                 <div
-                  key={poll?.id || Math.random()}
+                  key={poll?.id || `poll-${index}`}
                   className={`border rounded-xl transition-all overflow-hidden ${
                     isSelected
                       ? 'bg-slate-800/90 border-amber-400 shadow-md'
