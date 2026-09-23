@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
-import { createFileRoute, Link } from '@tanstack/react-router';
+import { createRoute, Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
+import { Route as rootRoute } from './__root';
 import { supabase } from '../lib/actions';
 
-export const Route = createFileRoute('/')({
+export const Route = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/',
   component: HomePage,
 });
 
@@ -14,7 +17,7 @@ function HomePage() {
     ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
     : null;
 
-  // 1. Partita con votazioni MVP attive
+  // 1. Partita con votazioni MVP aperte
   const { data: activeVotingMatch } = useQuery({
     queryKey: ['active_voting_match', activeLeagueId],
     queryFn: async () => {
@@ -39,7 +42,7 @@ function HomePage() {
     refetchInterval: 30000,
   });
 
-  // 2. Sondaggi attivi dalla tabella polls
+  // 2. Sondaggi aperti (query sicura dalla tabella polls)
   const { data: activePolls = [] } = useQuery({
     queryKey: ['active_polls_home', activeLeagueId],
     queryFn: async () => {
@@ -51,12 +54,16 @@ function HomePage() {
 
         if (error || !Array.isArray(data)) return [];
 
+        let filtered = data;
         if (activeLeagueId) {
-          return data.filter(
-            (p: any) => !p.league_id || p.league_id === activeLeagueId
-          );
+          filtered = data.filter((p: any) => !p.league_id || p.league_id === activeLeagueId);
         }
-        return data;
+
+        return filtered.sort((a: any, b: any) => {
+          const dateA = a.target_date || '';
+          const dateB = b.target_date || '';
+          return dateA.localeCompare(dateB);
+        });
       } catch {
         return [];
       }
@@ -84,6 +91,8 @@ function HomePage() {
     },
   });
 
+  const todayDateStr = new Date().toISOString().split('T')[0];
+
   return (
     <div className="space-y-6 pb-24 max-w-lg mx-auto">
       {/* Banner Titolo */}
@@ -94,13 +103,16 @@ function HomePage() {
         <h1 className="font-bebas text-4xl text-white tracking-wider">HUB PRINCIPALE</h1>
       </div>
 
-      {/* WIDGET MVP */}
-      {activeVotingMatch && activeVotingMatch.voting_deadline && (
+      {/* WIDGET PRIORITARIO: VOTAZIONI MVP ATTIVE */}
+      {activeVotingMatch && (
         <div className="bg-gradient-to-r from-amber-500/20 via-[#151c28] to-amber-500/10 border border-amber-400/60 rounded-2xl p-5 shadow-2xl space-y-3">
           <div className="flex justify-between items-center">
             <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5 animate-pulse">
               <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
               VOTAZIONI ATTIVE (2 ORE)
+            </span>
+            <span className="text-xs font-mono text-slate-300">
+              Scade alle: {activeVotingMatch.voting_deadline ? new Date(activeVotingMatch.voting_deadline).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : '--:--'}
             </span>
           </div>
 
@@ -122,84 +134,117 @@ function HomePage() {
         </div>
       )}
 
-      {/* CARD CONVOCAZIONI & SONDAGGI */}
+      {/* CARD CONVOCAZIONI & DISPONIBILITÀ SETTIMANALE */}
       {Array.isArray(activePolls) && activePolls.length > 0 && (
         <div className="bg-[#131926] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
           <div className="flex justify-between items-center border-b border-slate-800/80 pb-2">
             <div>
-              <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">
+              <span className="text-[10px] font-bold text-lime-400 uppercase tracking-wider block">
                 CONVOCAZIONI & DISPONIBILITÀ
               </span>
               <h2 className="font-bebas text-2xl text-white tracking-wide">
-                CALENDARIO SONDAGGI
+                CALENDARIO SETTIMANALE
               </h2>
             </div>
-            <span className="text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+            <span className="text-[11px] font-semibold bg-lime-400/10 text-lime-400 border border-lime-400/30 px-2 py-0.5 rounded-full">
               {activePolls.length} {activePolls.length === 1 ? 'GIORNO' : 'GIORNI'}
             </span>
           </div>
 
           <p className="text-xs text-slate-400">
-            Tocca un giorno per selezionare gli orari e confermare la tua presenza:
+            Tocca un giorno disponibile per verificare gli orari e confermare la tua presenza:
           </p>
 
           <div className="space-y-2">
-            {activePolls.map((poll: any, index: number) => {
+            {activePolls.map((poll: any) => {
+              const rawDate = poll?.target_date ? String(poll.target_date).split('T')[0] : '';
+              const isPast = Boolean(rawDate && rawDate < todayDateStr);
               const isSelected = selectedPollId === poll?.id;
+
+              let dayName = poll?.title || 'Partita di Calcetto';
+              let formattedDate = rawDate;
+
+              if (rawDate) {
+                try {
+                  const parts = rawDate.split('-');
+                  if (parts.length === 3) {
+                    const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+                    if (!isNaN(d.getTime())) {
+                      dayName = d.toLocaleDateString('it-IT', { weekday: 'long' });
+                      formattedDate = d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
+                    }
+                  }
+                } catch {
+                  // Fallback sicuro se il formato non è standard
+                  dayName = poll?.title || 'Partita';
+                  formattedDate = rawDate;
+                }
+              }
+
               const slots: string[] = Array.isArray(poll?.time_slots) && poll.time_slots.length > 0
                 ? poll.time_slots
                 : ['19:30', '20:00', '20:30', '21:00', '21:30', '22:00'];
 
               return (
                 <div
-                  key={poll?.id || `poll-${index}`}
+                  key={poll?.id || Math.random()}
                   className={`border rounded-xl transition-all overflow-hidden ${
-                    isSelected
-                      ? 'bg-slate-800/90 border-amber-400 shadow-md'
+                    isPast
+                      ? 'bg-slate-900/40 border-slate-800/50 opacity-40 pointer-events-none'
+                      : isSelected
+                      ? 'bg-slate-800/90 border-lime-400 shadow-md'
                       : 'bg-[#182132] border-slate-700/60 hover:border-slate-600'
                   }`}
                 >
                   <button
                     type="button"
+                    disabled={isPast}
                     onClick={() => setSelectedPollId(isSelected ? null : poll?.id)}
                     className="w-full flex items-center justify-between p-3.5 text-left"
                   >
                     <div className="flex items-center gap-3">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]" />
+                      <span className={`w-2 h-2 rounded-full ${isPast ? 'bg-slate-600' : 'bg-lime-400 shadow-[0_0_8px_rgba(163,230,53,0.6)]'}`} />
                       <div>
                         <div className="font-bebas text-lg tracking-wide text-white capitalize leading-tight">
-                          {poll?.title || 'Partita di Calcetto'}
+                          {dayName} {formattedDate && <span className="text-slate-400 font-sans text-xs font-normal">({formattedDate})</span>}
                         </div>
-                        {poll?.target_date && (
-                          <div className="text-[11px] text-slate-400 font-sans">
-                            Data: <span className="text-emerald-400 font-mono font-semibold">{String(poll.target_date)}</span>
-                          </div>
-                        )}
+                        <div className="text-[11px] text-slate-400 truncate">
+                          {poll?.title && poll.title !== dayName ? poll.title : 'Seleziona fascia oraria'}
+                        </div>
                       </div>
                     </div>
 
-                    <span className={`text-[10px] font-bold uppercase px-2.5 py-1 rounded-md transition ${
-                      isSelected
-                        ? 'bg-amber-400 text-slate-950 font-bold'
-                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                    }`}>
-                      {isSelected ? 'Chiudi ▲' : 'Prenotati ▼'}
-                    </span>
+                    <div>
+                      {isPast ? (
+                        <span className="text-[10px] font-bold uppercase text-slate-500 border border-slate-700 px-2 py-0.5 rounded">
+                          Passato
+                        </span>
+                      ) : (
+                        <span className={`text-[10px] font-bold uppercase px-2.5 py-1 rounded-md transition ${
+                          isSelected
+                            ? 'bg-lime-400 text-slate-950 font-bold'
+                            : 'bg-lime-400/20 text-lime-300 border border-lime-400/40'
+                        }`}>
+                          {isSelected ? 'Chiudi ▲' : 'Prenotati ▼'}
+                        </span>
+                      )}
+                    </div>
                   </button>
 
-                  {isSelected && (
+                  {/* Cassetto espandibile con orari e pulsante */}
+                  {isSelected && !isPast && (
                     <div className="px-3.5 pb-3.5 pt-2 border-t border-slate-700/60 space-y-3 bg-[#121824]">
                       <div>
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1.5">
-                          Orari Disponibili:
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
+                          Fasce Orarie Disponibili:
                         </span>
                         <div className="flex flex-wrap gap-1.5">
-                          {slots.map((slot) => (
+                          {slots.map((s) => (
                             <span
-                              key={slot}
-                              className="px-2 py-0.5 rounded text-xs font-mono bg-[#0b0e14] text-amber-400 border border-[#222c42]"
+                              key={s}
+                              className="px-2 py-0.5 rounded text-xs font-mono bg-[#0b0e14] text-lime-400 border border-slate-700"
                             >
-                              {slot}
+                              {s}
                             </span>
                           ))}
                         </div>
@@ -207,7 +252,7 @@ function HomePage() {
 
                       <Link
                         to="/polls"
-                        className="inline-block w-full text-center py-2 bg-gradient-to-r from-amber-400 to-amber-300 text-slate-950 font-bebas text-sm rounded-lg font-bold tracking-wider transition hover:brightness-105 shadow"
+                        className="inline-block w-full text-center py-2 bg-gradient-to-r from-lime-400 to-lime-300 hover:brightness-105 text-slate-950 font-bebas text-base rounded-lg font-bold tracking-wider transition shadow"
                       >
                         VAI AL SONDAGGIO & CONFERMA ➔
                       </Link>
@@ -220,7 +265,7 @@ function HomePage() {
         </div>
       )}
 
-      {/* PROSSIMA PARTITA */}
+      {/* WIDGET PROSSIMA PARTITA IN PROGRAMMA */}
       {upcomingMatch && (
         <div className="bg-[#131926] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
