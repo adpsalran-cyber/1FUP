@@ -29,8 +29,8 @@ export function MyLeaguesModal({
     });
   }, []);
 
-  // Recupera tutte le leghe associate all'utente (sia da league_members che da leagues create)
-  const { data: myLeagues, isLoading, refetch } = useQuery({
+  // Recupera tutte le leghe a cui l'utente appartiene
+  const { data: myLeagues, isLoading } = useQuery({
     queryKey: ['my_leagues_list', userId],
     enabled: Boolean(userId) && isOpen,
     queryFn: async () => {
@@ -162,7 +162,7 @@ export function MyLeaguesModal({
                 )}
               </div>
 
-              {/* Se l'utente è ADMIN di questa lega, mostra il codice invito da condividere */}
+              {/* Se l'utente è ADMIN di questa lega, mostra il codice invito per condividerlo */}
               {leg.isAdmin && (
                 <div className="flex items-center justify-between bg-[#151b28] border border-[#222c42] px-2.5 py-1.5 rounded-lg text-xs mt-1">
                   <span className="text-slate-400 text-[11px]">
