@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { createRoute } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Route as rootRoute } from './__root';
@@ -9,6 +9,79 @@ export const Route = createRoute({
   path: '/admin',
   component: AdminPage,
 });
+
+// Pesi percentuali matematici gestiti esclusivamente dietro le quinte
+const ROLE_ARCHETYPES: Record<string, Record<string, Record<string, number>>> = {
+  ATTACCANTE: {
+    BOMBER: { VEL: 0.15, DRI: 0.10, TIR: 0.35, PAS: 0.10, FIS: 0.20, DIF: 0.10 },
+    FANTASISTA: { VEL: 0.15, DRI: 0.25, TIR: 0.20, PAS: 0.25, FIS: 0.05, DIF: 0.10 },
+    BOA: { VEL: 0.05, DRI: 0.05, TIR: 0.30, PAS: 0.10, FIS: 0.40, DIF: 0.10 },
+    VIRTUOSO: { VEL: 0.20, DRI: 0.25, TIR: 0.25, PAS: 0.15, FIS: 0.05, DIF: 0.10 },
+  },
+  ESTERNO: {
+    FRECCIA: { VEL: 0.35, DRI: 0.20, TIR: 0.15, PAS: 0.10, FIS: 0.10, DIF: 0.10 },
+    INCURSORE: { VEL: 0.20, DRI: 0.15, TIR: 0.25, PAS: 0.10, FIS: 0.15, DIF: 0.15 },
+    FINALIZZATORE: { VEL: 0.25, DRI: 0.15, TIR: 0.30, PAS: 0.05, FIS: 0.15, DIF: 0.10 },
+  },
+  UNIVERSAL: {
+    JOLLY: { VEL: 0.17, DRI: 0.17, TIR: 0.16, PAS: 0.17, FIS: 0.16, DIF: 0.17 },
+    ONNIPRESENTE: { VEL: 0.20, DRI: 0.15, TIR: 0.15, PAS: 0.15, FIS: 0.20, DIF: 0.15 },
+    REGISTA: { VEL: 0.10, DRI: 0.15, TIR: 0.15, PAS: 0.35, FIS: 0.10, DIF: 0.15 },
+  },
+  DIFENSORE: {
+    MURO: { VEL: 0.05, DRI: 0.05, TIR: 0.05, PAS: 0.10, FIS: 0.35, DIF: 0.40 },
+    TECNICO: { VEL: 0.10, DRI: 0.15, TIR: 0.10, PAS: 0.25, FIS: 0.15, DIF: 0.25 },
+    LIBERO: { VEL: 0.15, DRI: 0.10, TIR: 0.05, PAS: 0.15, FIS: 0.20, DIF: 0.35 },
+    SUPPORTO: { VEL: 0.15, DRI: 0.15, TIR: 0.10, PAS: 0.25, FIS: 0.10, DIF: 0.25 },
+  },
+  PORTIERE: {
+    SARACINESCA: { RIF: 0.35, POS: 0.25, AGG: 0.10, PAS: 0.05, USC: 0.10, COM: 0.15 },
+    LIBERO: { RIF: 0.20, POS: 0.15, AGG: 0.20, PAS: 0.10, USC: 0.25, COM: 0.10 },
+    COSTRUTTORE: { RIF: 0.15, POS: 0.15, AGG: 0.10, PAS: 0.35, USC: 0.10, COM: 0.15 },
+  },
+};
+
+// Descrizioni dello stile di gioco (senza mostrare percentuali)
+const ARCHETYPE_DESCRIPTIONS: Record<string, string> = {
+  BOMBER: 'Letale negli ultimi metri, senso della posizione e conclusione potente e precisa.',
+  FANTASISTA: 'Creatività pura al servizio della squadra: dribbling, visione di gioco e assist smarcanti.',
+  BOA: 'Centravanti di peso che lavora spalle alla porta, difende il pallone e apre varchi ai compagni.',
+  VIRTUOSO: 'Agile e imprevedibile palla al piede, salta regolarmente il diretto avversario per finalizzare.',
+  FRECCIA: 'Velocità pura e strappi devastanti sulla corsia: eccelle nelle transizioni e nei contropiedi.',
+  INCURSORE: 'Attacca costantemente la profondità con inserimenti puntuali senza palla verso l\'area.',
+  FINALIZZATORE: 'Esterno votato all\'attacco: taglia verso il centro del campo per andare direttamente al tiro.',
+  JOLLY: 'Completo e versatile: garantisce rendimento elevato e affidabile in qualsiasi fase di gioco.',
+  ONNIPRESENTE: 'Dinamismo inesauribile: pressa ovunque, raddoppia e recupera palloni da inizio a fine match.',
+  REGISTA: 'Il metronomo del gruppo: detta i ritmi, imposta la manovra e fa circolare palla con precisione.',
+  MURO: 'Invalicabile nei contrasti e nell\'uno contro uno difensivo: fa della forza fisica il suo punto cardine.',
+  TECNICO: 'Difensore abile nel disimpegno e nel possesso: avvia la risalita palla al piede con lucidità.',
+  LIBERO: 'Grande intelligenza tattica: legge in anticipo le linee di passaggio avversarie e copre gli spazi.',
+  SUPPORTO: 'Difensore propositivo: accompagna la manovra avanzata offrendo sempre una sponda pulita.',
+  SARACINESCA: 'Riflessi prodigiosi e posizionamento sicuro tra i pali a protezione dello specchio.',
+  LIBERO_POR: 'Portiere reattivo nelle uscite basse e fuori dall\'area: accorcia e copre lo spazio alle spalle della difesa.',
+  COSTRUTTORE: 'Abile con i piedi e nella distribuzione del gioco: agisce da costruttore aggiunto della squadra.',
+};
+
+// Calcolo matematico della distribuzione attributi partendo dall'OVR
+function calculateAttributesFromOvr(role: string, archetype: string, targetOvr: number) {
+  const weights = ROLE_ARCHETYPES[role]?.[archetype];
+  if (!weights) {
+    if (role === 'PORTIERE') {
+      return { RIF: targetOvr, POS: targetOvr, AGG: targetOvr, PAS: targetOvr, USC: targetOvr, COM: targetOvr };
+    }
+    return { VEL: targetOvr, DRI: targetOvr, TIR: targetOvr, PAS: targetOvr, FIS: targetOvr, DIF: targetOvr };
+  }
+
+  const totalPoints = targetOvr * 6;
+  const result: Record<string, number> = {};
+
+  Object.entries(weights).forEach(([key, weight]) => {
+    const rawVal = Math.round(totalPoints * weight);
+    result[key] = Math.min(99, Math.max(40, rawVal));
+  });
+
+  return result;
+}
 
 function AdminPage() {
   const queryClient = useQueryClient();
@@ -32,11 +105,33 @@ function AdminPage() {
 
   // --- 3. CREAZIONE GIOCATORE / DUMMY / ARCHETIPO ---
   const [playerName, setPlayerName] = useState('');
-  const [playerRole, setPlayerRole] = useState('ATT');
-  const [playerArchetype, setPlayerArchetype] = useState('Cecchino');
+  const [playerRole, setPlayerRole] = useState('ATTACCANTE');
+  const [playerArchetype, setPlayerArchetype] = useState('BOMBER');
   const [playerOverall, setPlayerOverall] = useState(70);
   const [isDummy, setIsDummy] = useState(false);
   const [creatingPlayer, setCreatingPlayer] = useState(false);
+
+  // Elenco archetipi coerente col ruolo scelto
+  const availableArchetypes = useMemo(() => {
+    return Object.keys(ROLE_ARCHETYPES[playerRole] || {});
+  }, [playerRole]);
+
+  // Gestione cambio ruolo con reset dell'archetipo iniziale
+  const handleRoleChange = (newRole: string) => {
+    setPlayerRole(newRole);
+    const archs = Object.keys(ROLE_ARCHETYPES[newRole] || {});
+    if (archs.length > 0) {
+      setPlayerArchetype(archs[0]);
+    }
+  };
+
+  // Descrizione narrativa contestualizzata
+  const currentArchetypeDescription = useMemo(() => {
+    if (playerRole === 'PORTIERE' && playerArchetype === 'LIBERO') {
+      return ARCHETYPE_DESCRIPTIONS['LIBERO_POR'];
+    }
+    return ARCHETYPE_DESCRIPTIONS[playerArchetype] || 'Stile di gioco caratteristico del ruolo.';
+  }, [playerRole, playerArchetype]);
 
   // --- 4. MATCHMAKER / GENERATORE SQUADRE ---
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<string[]>([]);
@@ -173,23 +268,24 @@ function AdminPage() {
     }
   };
 
-  // --- AZIONI GIOCATORI ---
+  // --- AZIONI GIOCATORI CON DISTRIBUZIONE ATTRIBUTI CALCOLATA ---
   const handleCreatePlayer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!playerName.trim() || !activeLeagueId) return;
     setCreatingPlayer(true);
     try {
-      const defaultAttrs = { VEL: 65, TIR: 65, PAS: 65, DRI: 65, DIF: 65, FIS: 65 };
+      const computedAttrs = calculateAttributesFromOvr(playerRole, playerArchetype, Number(playerOverall) || 70);
+
       const { error } = await supabase.from('players').insert({
         league_id: activeLeagueId,
         name: playerName.trim(),
         role: playerRole,
         archetype: playerArchetype,
         overall: Number(playerOverall),
-        attributes: defaultAttrs,
+        attributes: computedAttrs,
         is_dummy: isDummy,
         teamwork: 'Medio',
-        gk_efficiency: 'Media',
+        gk_efficiency: playerRole === 'PORTIERE' ? 'Alta' : 'Media',
         condition: '0',
       });
       if (error) throw error;
@@ -547,7 +643,7 @@ function AdminPage() {
         </div>
       )}
 
-      {/* 3. SEZIONE GESTIONE GIOCATORI & BOT (CON ARCHETIPI) */}
+      {/* 3. SEZIONE GESTIONE GIOCATORI & BOT (CON ARCHETIPI NARRATIVI) */}
       {activeTab === 'players' && (
         <div className="space-y-4">
           <div className="bg-[#131926] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
@@ -570,14 +666,14 @@ function AdminPage() {
                   <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Ruolo</label>
                   <select
                     value={playerRole}
-                    onChange={(e) => setPlayerRole(e.target.value)}
+                    onChange={(e) => handleRoleChange(e.target.value)}
                     className="w-full bg-[#0b0e14] border border-slate-700 text-white rounded-xl px-2 py-2 text-xs"
                   >
-                    <option value="POR">Portiere (POR)</option>
-                    <option value="DIF">Difensore (DIF)</option>
-                    <option value="CEN">Centrocampista (CEN)</option>
-                    <option value="ATT">Attaccante (ATT)</option>
-                    <option value="UNI">Universale (UNI)</option>
+                    <option value="ATTACCANTE">ATTACCANTE</option>
+                    <option value="ESTERNO">ESTERNO</option>
+                    <option value="UNIVERSAL">UNIVERSAL</option>
+                    <option value="DIFENSORE">DIFENSORE</option>
+                    <option value="PORTIERE">PORTIERE</option>
                   </select>
                 </div>
 
@@ -588,14 +684,9 @@ function AdminPage() {
                     onChange={(e) => setPlayerArchetype(e.target.value)}
                     className="w-full bg-[#0b0e14] border border-slate-700 text-white rounded-xl px-2 py-2 text-xs"
                   >
-                    <option value="Saracinesca">Saracinesca</option>
-                    <option value="Muro">Muro Difensivo</option>
-                    <option value="Metronomo">Metronomo</option>
-                    <option value="Motorino">Motorino</option>
-                    <option value="Fantasista">Fantasista</option>
-                    <option value="Cecchino">Cecchino</option>
-                    <option value="Pivot">Pivot</option>
-                    <option value="Equilibrato">Equilibrato</option>
+                    {availableArchetypes.map((arch) => (
+                      <option key={arch} value={arch}>{arch}</option>
+                    ))}
                   </select>
                 </div>
 
@@ -611,6 +702,16 @@ function AdminPage() {
                     className="w-full bg-[#0b0e14] border border-slate-700 text-white rounded-xl px-2 py-2 text-xs"
                   />
                 </div>
+              </div>
+
+              {/* Riquadro descrittivo dello stile (nessuna percentuale visibile) */}
+              <div className="p-3 bg-[#0b0e14] border border-slate-800 rounded-xl">
+                <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block mb-1">
+                  Stile: {playerArchetype}
+                </span>
+                <p className="text-xs text-slate-300 italic leading-relaxed">
+                  "{currentArchetypeDescription}"
+                </p>
               </div>
 
               <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer pt-1">
@@ -734,4 +835,4 @@ function AdminPage() {
       )}
     </div>
   );
-        }
+}
