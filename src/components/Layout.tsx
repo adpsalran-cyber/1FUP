@@ -4,7 +4,6 @@ import { createClient } from '@supabase/supabase-js';
 import { AuthModal } from './AuthModal';
 import { LeagueModal } from './LeagueModal';
 import { MyLeaguesModal } from './MyLeaguesModal';
-import { ProfileView } from './ProfileView';
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL || '',
@@ -22,34 +21,47 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [leagueId, setLeagueId] = useState<string | null>(
-    typeof window !== 'undefined'
-      ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
-      : null
-  );
-  const [leagueName, setLeagueName] = useState<string>('');
-  const [userRole, setUserRole] = useState<string>(
-    typeof window !== 'undefined' ? localStorage.getItem('alci_user_role') || 'member' : 'member'
-  );
-  const [needsProfile, setNeedsProfile] = useState(false);
+
+  // Inizializza subito con quanto salvato nel telefono
+  const [leagueId, setLeagueId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id') || null;
+    }
+    return null;
+  });
+
+  const [leagueName, setLeagueName] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('alci_league_name') || '';
+    }
+    return '';
+  });
+
+  const [userRole, setUserRole] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('alci_user_role') || 'member';
+    }
+    return 'member';
+  });
+
   const [showMyLeagues, setShowMyLeagues] = useState(false);
 
-  // 1. Salva l'ultima schermata visitata ogni volta che cambia rotta
+  // 1. Memorizza costantemente la pagina corrente
   useEffect(() => {
     if (typeof window !== 'undefined' && currentPath) {
       localStorage.setItem('alci_last_path', currentPath);
     }
   }, [currentPath]);
 
-  // 2. Ripristina l'ultima schermata all'avvio se l'utente atterra sulla root '/'
+  // 2. Ripristina l'ultima pagina visitata
   useEffect(() => {
-    if (typeof window !== 'undefined' && !loading && session && leagueId) {
+    if (typeof window !== 'undefined' && !loading && session) {
       const savedPath = localStorage.getItem('alci_last_path');
       if (savedPath && savedPath !== '/' && currentPath === '/') {
         navigate({ to: savedPath as any });
       }
     }
-  }, [loading, session, leagueId]);
+  }, [loading, session]);
 
   const checkUserStatus = async (user: any) => {
     if (!user) {
@@ -60,70 +72,63 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
     setSession(user);
 
-    const storedLeagueId = localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id');
+    // Se abbiamo già la lega salvata localmente, NON forziamo modali bloccanti
+    const savedLid = localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id');
 
-    let membershipQuery = supabase
-      .from('league_members')
-      .select('league_id, role, leagues(name, invite_code, code)')
-      .eq('user_id', user.id);
-
-    if (storedLeagueId) {
-      membershipQuery = membershipQuery.eq('league_id', storedLeagueId);
-    }
-
-    const { data: membership } = await membershipQuery.limit(1).maybeSingle();
-
-    if (membership && membership.league_id) {
-      const lid = membership.league_id;
-      const role = membership.role || 'member';
-      setLeagueId(lid);
-      setUserRole(role);
-      localStorage.setItem('alci_league_id', lid);
-      localStorage.setItem('active_league_id', lid);
-      localStorage.setItem('alci_user_role', role);
-      const lName = (membership.leagues as any)?.name || 'La Mia Lega';
-      setLeagueName(lName);
-
-      if (role === 'admin') {
-        setNeedsProfile(false);
-        setLoading(false);
-        return;
-      }
-
-      const { data: player } = await supabase
-        .from('players')
-        .select('id')
-        .eq('league_id', lid)
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      setNeedsProfile(!player);
-    } else {
-      const { data: anyMembership } = await supabase
+    try {
+      let query = supabase
         .from('league_members')
         .select('league_id, role, leagues(name, invite_code, code)')
-        .eq('user_id', user.id)
-        .limit(1)
-        .maybeSingle();
+        .eq('user_id', user.id);
 
-      if (anyMembership?.league_id) {
-        const lid = anyMembership.league_id;
-        const role = anyMembership.role || 'member';
+      if (savedLid) {
+        query = query.eq('league_id', savedLid);
+      }
+
+      const { data: membership } = await query.limit(1).maybeSingle();
+
+      if (membership && membership.league_id) {
+        const lid = membership.league_id;
+        const role = membership.role || 'member';
+        const name = (membership.leagues as any)?.name || 'La Mia Lega';
+
         setLeagueId(lid);
         setUserRole(role);
+        setLeagueName(name);
+
         localStorage.setItem('alci_league_id', lid);
         localStorage.setItem('active_league_id', lid);
         localStorage.setItem('alci_user_role', role);
-        setLeagueName((anyMembership.leagues as any)?.name || 'La Mia Lega');
-        setNeedsProfile(false);
-      } else {
-        setLeagueId(null);
-        setLeagueName('');
-        setNeedsProfile(true);
-      }
-    }
+        localStorage.setItem('alci_league_name', name);
+      } else if (!savedLid) {
+        // Solo se non abbiamo proprio nessuna lega salvata in locale, cerchiamo qualsiasi membership
+        const { data: anyM } = await supabase
+          .from('league_members')
+          .select('league_id, role, leagues(name, invite_code, code)')
+          .eq('user_id', user.id)
+          .limit(1)
+          .maybeSingle();
 
-    setLoading(false);
+        if (anyM?.league_id) {
+          const lid = anyM.league_id;
+          const role = anyM.role || 'member';
+          const name = (anyM.leagues as any)?.name || 'La Mia Lega';
+
+          setLeagueId(lid);
+          setUserRole(role);
+          setLeagueName(name);
+
+          localStorage.setItem('alci_league_id', lid);
+          localStorage.setItem('active_league_id', lid);
+          localStorage.setItem('alci_user_role', role);
+          localStorage.setItem('alci_league_name', name);
+        }
+      }
+    } catch (e) {
+      console.error('Errore ripristino lega:', e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -143,21 +148,21 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     localStorage.removeItem('alci_league_id');
     localStorage.removeItem('active_league_id');
     localStorage.removeItem('alci_user_role');
+    localStorage.removeItem('alci_league_name');
     localStorage.removeItem('alci_last_path');
     setSession(null);
     setLeagueId(null);
     setLeagueName('');
-    setNeedsProfile(false);
   };
 
   const handleExitCurrentLeague = () => {
     localStorage.removeItem('alci_league_id');
     localStorage.removeItem('active_league_id');
     localStorage.removeItem('alci_user_role');
+    localStorage.removeItem('alci_league_name');
     localStorage.removeItem('alci_last_path');
     setLeagueId(null);
     setLeagueName('');
-    setNeedsProfile(true);
     setShowMyLeagues(false);
   };
 
@@ -165,10 +170,11 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     localStorage.setItem('alci_league_id', lid);
     localStorage.setItem('active_league_id', lid);
     localStorage.setItem('alci_user_role', role);
+    localStorage.setItem('alci_league_name', name);
     setLeagueId(lid);
     setUserRole(role);
     setLeagueName(name);
-    setNeedsProfile(false);
+    setShowMyLeagues(false);
     window.location.reload();
   };
 
@@ -184,7 +190,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   return (
     <div className="flex min-h-screen flex-col bg-[#0b0e14] text-slate-100 font-sans pb-24">
-      {/* Top Header */}
+      {/* Header */}
       <header className="sticky top-0 z-40 flex items-center justify-between border-b border-slate-800/80 bg-[#121721]/90 px-4 py-3 backdrop-blur-md">
         <div className="flex items-center gap-2">
           <span className="font-bebas text-2xl tracking-wider text-amber-400">ALCI</span>
@@ -230,7 +236,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         )}
       </header>
 
-      {/* Contenuto principale gestito dal router */}
+      {/* Main Content */}
       <main className="flex-1 p-4 max-w-lg mx-auto w-full">
         {children}
       </main>
@@ -245,7 +251,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         />
       )}
 
-      {/* Auth Modal */}
+      {/* Auth Modal se non loggato */}
       {!session && (
         <AuthModal
           onSuccess={() => {
@@ -254,8 +260,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         />
       )}
 
-      {/* Selezione lega se non attiva */}
-      {session && (!leagueId || needsProfile) && (
+      {/* Modale Selezione/Creazione Lega: SOLO SE NON ESISTE NESSUNA LEGA ATTIVA */}
+      {session && !leagueId && (
         <LeagueModal
           userId={session.id}
           onLeagueSelected={(lid, role) => {
@@ -264,12 +270,11 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             localStorage.setItem('alci_user_role', role);
             setLeagueId(lid);
             setUserRole(role);
-            setNeedsProfile(false);
           }}
         />
       )}
 
-      {/* Barra inferiore fissa a 5 tab */}
+      {/* Barra Navigazione Inferiore a 5 Tab */}
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-800/80 bg-[#121721]/95 backdrop-blur-md py-2">
         <div className="mx-auto flex max-w-lg items-center justify-around px-2">
           <Link
