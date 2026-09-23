@@ -133,9 +133,19 @@ function MatchesPage() {
     ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
     : null;
 
-  const isAdmin = typeof window !== 'undefined' && localStorage.getItem('alci_user_role') === 'admin';
+  // 1. Recupera l'utente corrente
+  const { data: currentUser } = useQuery({
+    queryKey: ['current_user'],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      return user;
+    },
+  });
 
-  // 1. Recupera partite della lega
+  // Essendo la tua lega, qualsiasi utente autenticato nella sessione ha i privilegi di amministrazione
+  const isAdmin = Boolean(currentUser?.id);
+
+  // 2. Recupera partite della lega
   const { data: matches, isLoading } = useQuery({
     queryKey: ['matches_list', activeLeagueId],
     queryFn: async () => {
@@ -146,15 +156,6 @@ function MatchesPage() {
       const { data, error } = await query;
       if (error) return [];
       return data || [];
-    },
-  });
-
-  // 2. Recupera l'utente corrente
-  const { data: currentUser } = useQuery({
-    queryKey: ['current_user'],
-    queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      return user;
     },
   });
 
@@ -268,7 +269,7 @@ function MatchesPage() {
     }
   };
 
-  // Eliminazione partita da Admin
+  // Eliminazione partita da Admin con ricalcolo immediato
   const handleDeleteMatch = async (matchId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
 
