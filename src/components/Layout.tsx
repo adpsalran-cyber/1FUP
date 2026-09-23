@@ -1,194 +1,282 @@
-import React, { useState, useEffect } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '../lib/actions';
+import React, { useEffect, useState } from 'react';
+import { Link, useRouterState } from '@tanstack/react-router';
+import { createClient } from '@supabase/supabase-js';
+import { AuthModal } from './AuthModal';
+import { LeagueModal } from './LeagueModal';
+import { MyLeaguesModal } from './MyLeaguesModal';
 
-interface MyLeaguesModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onSelectLeague: (leagueId: string, role: string, leagueName: string) => void;
-  onExitCurrentLeague: () => void;
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL || '',
+  import.meta.env.VITE_SUPABASE_ANON_KEY || ''
+);
+
+interface LayoutProps {
+  children: React.ReactNode;
 }
 
-export function MyLeaguesModal({
-  isOpen,
-  onClose,
-  onSelectLeague,
-  onExitCurrentLeague,
-}: MyLeaguesModalProps) {
-  const queryClient = useQueryClient();
-  const [userId, setUserId] = useState<string | null>(null);
-  const [copiedCode, setCopiedCode] = useState<string | null>(null);
+export const Layout: React.FC<LayoutProps> = ({ children }) => {
+  const routerState = useRouterState();
+  const currentPath = routerState.location.pathname;
 
-  const activeLeagueId = typeof window !== 'undefined'
-    ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
-    : null;
+  const [session, setSession] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [leagueId, setLeagueId] = useState<string | null>(
+    typeof window !== 'undefined'
+      ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
+      : null
+  );
+  const [leagueName, setLeagueName] = useState<string>('');
+  const [needsProfile, setNeedsProfile] = useState(false);
+  const [showMyLeagues, setShowMyLeagues] = useState(false);
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) setUserId(user.id);
-    });
-  }, []);
+  const checkUserStatus = async (user: any) => {
+    if (!user) {
+      setSession(null);
+      setLoading(false);
+      return;
+    }
 
-  // Recupera tutte le leghe associate all'utente (sia da league_members che da leagues create)
-  const { data: myLeagues, isLoading, refetch } = useQuery({
-    queryKey: ['my_leagues_list', userId],
-    enabled: Boolean(userId) && isOpen,
-    queryFn: async () => {
-      if (!userId) return [];
+    setSession(user);
 
-      const { data, error } = await supabase
+    const storedLeagueId = localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id');
+
+    let membershipQuery = supabase
+      .from('league_members')
+      .select('league_id, role, leagues(name, invite_code, code)')
+      .eq('user_id', user.id);
+
+    if (storedLeagueId) {
+      membershipQuery = membershipQuery.eq('league_id', storedLeagueId);
+    }
+
+    const { data: membership } = await membershipQuery.limit(1).maybeSingle();
+
+    if (membership && membership.league_id) {
+      const lid = membership.league_id;
+      setLeagueId(lid);
+      localStorage.setItem('alci_league_id', lid);
+      localStorage.setItem('active_league_id', lid);
+      localStorage.setItem('alci_user_role', membership.role || 'member');
+      const lName = (membership.leagues as any)?.name || 'La Mia Lega';
+      setLeagueName(lName);
+
+      if (membership.role === 'admin') {
+        setNeedsProfile(false);
+        setLoading(false);
+        return;
+      }
+
+      const { data: player } = await supabase
+        .from('players')
+        .select('id')
+        .eq('league_id', lid)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      setNeedsProfile(!player);
+    } else {
+      const { data: anyMembership } = await supabase
         .from('league_members')
-        .select(`
-          role,
-          league_id,
-          leagues (
-            id,
-            name,
-            invite_code,
-            code,
-            created_by
-          )
-        `)
-        .eq('user_id', userId);
+        .select('league_id, role, leagues(name, invite_code, code)')
+        .eq('user_id', user.id)
+        .limit(1)
+        .maybeSingle();
 
-      if (error) return [];
+      if (anyMembership?.league_id) {
+        setLeagueId(anyMembership.league_id);
+        localStorage.setItem('alci_league_id', anyMembership.league_id);
+        localStorage.setItem('active_league_id', anyMembership.league_id);
+        localStorage.setItem('alci_user_role', anyMembership.role || 'member');
+        setLeagueName((anyMembership.leagues as any)?.name || 'La Mia Lega');
+        setNeedsProfile(false);
+      } else {
+        setLeagueId(null);
+        setLeagueName('');
+        setNeedsProfile(true);
+      }
+    }
 
-      return (data || []).map((item: any) => {
-        const legObj = item.leagues || {};
-        const code = legObj.invite_code || legObj.code || 'N/D';
-        const isAdmin = item.role === 'admin' || legObj.created_by === userId;
-
-        return {
-          id: legObj.id || item.league_id,
-          name: legObj.name || 'La Mia Lega',
-          code,
-          role: isAdmin ? 'admin' : (item.role || 'member'),
-          isAdmin,
-          isCurrent: (legObj.id || item.league_id) === activeLeagueId,
-        };
-      });
-    },
-  });
-
-  if (!isOpen) return null;
-
-  const copyToClipboard = (code: string) => {
-    navigator.clipboard.writeText(code);
-    setCopiedCode(code);
-    setTimeout(() => setCopiedCode(null), 2000);
+    setLoading(false);
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-      <div className="bg-[#151b28] border border-[#222c42] rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl">
-        <div className="flex justify-between items-start border-b border-[#222c42] pb-3">
-          <div>
-            <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
-              GESTIONE ACCOUNT
-            </span>
-            <h2 className="font-bebas text-2xl text-slate-100">LE MIE LEGHE</h2>
-          </div>
-          <button
-            onClick={onClose}
-            className="w-7 h-7 rounded-full bg-[#0b0e14] text-slate-400 flex items-center justify-center hover:text-white"
-          >
-            ✕
-          </button>
-        </div>
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      checkUserStatus(session?.user ?? null);
+    });
 
-        {/* Pulsante per uscire dalla lega attiva SENZA fare logout */}
-        {activeLeagueId && (
-          <button
-            type="button"
-            onClick={onExitCurrentLeague}
-            className="w-full py-2.5 px-3 bg-[#0b0e14] border border-amber-400/40 hover:border-amber-400 text-amber-300 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition shadow"
-          >
-            <span>🚪</span>
-            <span>Esci dalla lega attuale (Cambia o Iscriviti)</span>
-          </button>
-        )}
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      checkUserStatus(session?.user ?? null);
+    });
 
-        {/* Lista Leghe */}
-        <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
-          {isLoading && (
-            <p className="text-center text-xs text-slate-500 py-4">Caricamento leghe...</p>
-          )}
+    return () => subscription.unsubscribe();
+  }, []);
 
-          {!isLoading && (!myLeagues || myLeagues.length === 0) && (
-            <p className="text-center text-xs text-slate-400 py-4 italic">
-              Non risulti iscritto a nessuna lega al momento.
-            </p>
-          )}
+  // Logout totale dall'account
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    localStorage.removeItem('alci_league_id');
+    localStorage.removeItem('active_league_id');
+    localStorage.removeItem('alci_user_role');
+    setSession(null);
+    setLeagueId(null);
+    setLeagueName('');
+    setNeedsProfile(false);
+  };
 
-          {myLeagues?.map((leg: any) => (
-            <div
-              key={leg.id}
-              className={`p-3 rounded-xl border flex flex-col gap-2 transition ${
-                leg.isCurrent
-                  ? 'bg-amber-400/10 border-amber-400/50'
-                  : 'bg-[#0b0e14] border-[#222c42]'
-              }`}
-            >
-              <div className="flex justify-between items-center">
-                <div className="min-w-0 pr-2">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="text-sm font-bold text-slate-100 truncate">{leg.name}</h3>
-                    {leg.isCurrent && (
-                      <span className="text-[9px] bg-lime-400 text-slate-950 font-bold px-1.5 py-0.2 rounded">
-                        ATTIVA
-                      </span>
-                    )}
-                  </div>
-                  <span
-                    className={`text-[10px] font-bold uppercase tracking-wider block mt-0.5 ${
-                      leg.isAdmin ? 'text-amber-400' : 'text-slate-400'
-                    }`}
-                  >
-                    {leg.isAdmin ? 'Ruolo: ADMIN / CREATORE' : 'Ruolo: OSPITE / MEMBRO'}
-                  </span>
-                </div>
+  // Uscita dalla singola lega SENZA disconnettere l'utente
+  const handleExitCurrentLeague = () => {
+    localStorage.removeItem('alci_league_id');
+    localStorage.removeItem('active_league_id');
+    localStorage.removeItem('alci_user_role');
+    setLeagueId(null);
+    setLeagueName('');
+    setNeedsProfile(true);
+    setShowMyLeagues(false);
+  };
 
-                {!leg.isCurrent && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onSelectLeague(leg.id, leg.role, leg.name);
-                      onClose();
-                    }}
-                    className="px-3.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bebas text-sm rounded-lg font-bold transition shadow"
-                  >
-                    ENTRA
-                  </button>
-                )}
-              </div>
+  // Cambio attivo a un'altra lega
+  const handleSelectLeague = (lid: string, role: string, name: string) => {
+    localStorage.setItem('alci_league_id', lid);
+    localStorage.setItem('active_league_id', lid);
+    localStorage.setItem('alci_user_role', role);
+    setLeagueId(lid);
+    setLeagueName(name);
+    setNeedsProfile(false);
+    window.location.reload();
+  };
 
-              {/* Se l'utente è ADMIN di questa lega, mostra il codice invito da condividere */}
-              {leg.isAdmin && (
-                <div className="flex items-center justify-between bg-[#151b28] border border-[#222c42] px-2.5 py-1.5 rounded-lg text-xs mt-1">
-                  <span className="text-slate-400 text-[11px]">
-                    Codice Invito: <strong className="text-amber-300 font-mono tracking-wider">{leg.code}</strong>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => copyToClipboard(leg.code)}
-                    className="text-[10px] font-bold text-amber-400 hover:underline uppercase"
-                  >
-                    {copiedCode === leg.code ? 'COPIATO! ✓' : 'COPIA CODICE'}
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <button
-          type="button"
-          onClick={onClose}
-          className="w-full py-2 bg-[#0b0e14] text-slate-400 hover:text-slate-200 border border-[#222c42] rounded-xl text-xs font-semibold"
-        >
-          Chiudi
-        </button>
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#0b0e14] text-amber-400 font-bebas text-2xl tracking-widest">
+        CARICAMENTO ALCI FUTSAL...
       </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-screen flex-col bg-[#0b0e14] text-slate-100 font-sans pb-24">
+      {/* Top Header */}
+      <header className="sticky top-0 z-40 flex items-center justify-between border-b border-slate-800/80 bg-[#121721]/90 px-4 py-3 backdrop-blur-md">
+        <div className="flex items-center gap-2">
+          <span className="font-bebas text-2xl tracking-wider text-amber-400">ALCI</span>
+          {leagueName && (
+            <span className="rounded-md bg-amber-400/10 px-2 py-0.5 text-[11px] font-semibold tracking-wide text-amber-400 border border-amber-400/20 max-w-[130px] truncate">
+              {leagueName}
+            </span>
+          )}
+        </div>
+
+        {session && (
+          <div className="flex items-center gap-2">
+            {/* Tasto Le Mie Leghe */}
+            <button
+              type="button"
+              onClick={() => setShowMyLeagues(true)}
+              className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-2.5 py-1 text-xs font-bold text-amber-300 hover:bg-amber-400 hover:text-slate-950 transition flex items-center gap-1 shadow-sm"
+            >
+              <span>🏆</span>
+              <span>Le mie leghe</span>
+            </button>
+
+            {/* Logout Completo */}
+            <button
+              onClick={handleLogout}
+              className="rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-xs font-semibold text-slate-300 hover:bg-red-950/40 hover:text-red-400 hover:border-red-800 transition"
+            >
+              Esci
+            </button>
+          </div>
+        )}
+      </header>
+
+      {/* Main Content */}
+      <main className="flex-1 p-4 max-w-lg mx-auto w-full">
+        {children}
+      </main>
+
+      {/* Modale Le Mie Leghe */}
+      {session && (
+        <MyLeaguesModal
+          isOpen={showMyLeagues}
+          onClose={() => setShowMyLeagues(false)}
+          onSelectLeague={handleSelectLeague}
+          onExitCurrentLeague={handleExitCurrentLeague}
+        />
+      )}
+
+      {/* Auth Modal se non loggato */}
+      {!session && (
+        <AuthModal
+          onSuccess={() => {
+            supabase.auth.getUser().then(({ data: { user } }) => checkUserStatus(user));
+          }}
+        />
+      )}
+
+      {/* League & Profile Modal se loggato ma senza lega o profilo obbligatorio */}
+      {session && (!leagueId || needsProfile) && (
+        <LeagueModal
+          userId={session.id}
+          onLeagueSelected={(lid, role) => {
+            localStorage.setItem('alci_league_id', lid);
+            localStorage.setItem('active_league_id', lid);
+            localStorage.setItem('alci_user_role', role);
+            setLeagueId(lid);
+            setNeedsProfile(false);
+          }}
+        />
+      )}
+
+      {/* Bottom Navigation Bar */}
+      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-800/80 bg-[#121721]/95 backdrop-blur-md py-2">
+        <div className="mx-auto flex max-w-lg items-center justify-around px-2">
+          <Link
+            to="/"
+            className={`flex flex-col items-center gap-1 text-[11px] font-medium tracking-wide uppercase transition ${
+              currentPath === '/' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <span className="text-lg">⚽</span>
+            Home
+          </Link>
+          <Link
+            to="/matches"
+            className={`flex flex-col items-center gap-1 text-[11px] font-medium tracking-wide uppercase transition ${
+              currentPath === '/matches' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <span className="text-lg">⚔️</span>
+            Partite
+          </Link>
+          <Link
+            to="/standings"
+            className={`flex flex-col items-center gap-1 text-[11px] font-medium tracking-wide uppercase transition ${
+              currentPath === '/standings' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <span className="text-lg">🏆</span>
+            Classifica
+          </Link>
+          <Link
+            to="/players"
+            className={`flex flex-col items-center gap-1 text-[11px] font-medium tracking-wide uppercase transition ${
+              currentPath === '/players' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <span className="text-lg">🎴</span>
+            Players
+          </Link>
+          <Link
+            to="/admin"
+            className={`flex flex-col items-center gap-1 text-[11px] font-medium tracking-wide uppercase transition ${
+              currentPath === '/admin' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <span className="text-lg">⚙️</span>
+            Admin
+          </Link>
+        </div>
+      </nav>
     </div>
   );
-}
+};
