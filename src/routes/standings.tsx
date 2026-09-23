@@ -45,11 +45,11 @@ function StandingsPage() {
 
       if (pErr || !players) return [];
 
-      // B. Tutte le partite della lega
+      // B. Tutte le partite della lega (inclusi record orfani o senza league_id esplicito)
       const { data: matches } = await supabase
         .from('matches')
         .select('*')
-        .eq('league_id', activeLeagueId);
+        .or(`league_id.eq.${activeLeagueId},league_id.is.null`);
 
       // Inizializza mappa statistiche a 0 per tutti
       const stats: Record<string, { pg: number; v: number; p: number; s: number; mvp: number }> = {};
@@ -57,33 +57,36 @@ function StandingsPage() {
         stats[p.id] = { pg: 0, v: 0, p: 0, s: 0, mvp: Number(p.mvp_count || 0) };
       });
 
-      // Funzione helper per estrarre l'ID di un giocatore sia se è un oggetto sia se è già una stringa UUID
+      // Funzione helper flessibile per estrarre l'ID di un giocatore sia se è un oggetto sia se è una stringa UUID
       const extractId = (item: any): string | null => {
         if (!item) return null;
         if (typeof item === 'string') return item;
-        if (typeof item === 'object' && item.id) return item.id;
+        if (typeof item === 'object') return item.id || item.player_id || null;
         return null;
       };
 
       // C. Calcola i risultati da qualsiasi partita conclusa
       if (matches && matches.length > 0) {
         matches.forEach((m: any) => {
-          // Considera conclusa se lo status è completed/finished oppure se ha un punteggio impostato
+          // Supporta sia score_team1/score_team2 che score_team_a/score_team_b
+          const rawScore1 = m.score_team1 ?? m.score_team_a;
+          const rawScore2 = m.score_team2 ?? m.score_team_b;
+
           const isCompleted =
             m.status === 'completed' ||
             m.status === 'finished' ||
-            (m.score_team1 !== null && m.score_team2 !== null && (m.score_team1 > 0 || m.score_team2 > 0 || m.status !== 'scheduled'));
+            (rawScore1 !== null && rawScore2 !== null && (rawScore1 > 0 || rawScore2 > 0 || m.status !== 'scheduled'));
 
           if (!isCompleted) return;
 
-          const s1 = Number(m.score_team1 ?? 0);
-          const s2 = Number(m.score_team2 ?? 0);
+          const s1 = Number(rawScore1 ?? 0);
+          const s2 = Number(rawScore2 ?? 0);
           const isDraw = s1 === s2;
           const t1Won = s1 > s2;
           const t2Won = s2 > s1;
 
-          // Gestione team1
-          let t1List = m.team1_players;
+          // Gestione Squadra 1 (supporta team1_players, team_a, team1)
+          let t1List = m.team1_players ?? m.team_a ?? m.team1 ?? [];
           if (typeof t1List === 'string') {
             try { t1List = JSON.parse(t1List); } catch (e) { t1List = []; }
           }
@@ -99,8 +102,8 @@ function StandingsPage() {
             });
           }
 
-          // Gestione team2
-          let t2List = m.team2_players;
+          // Gestione Squadra 2 (supporta team2_players, team_b, team2)
+          let t2List = m.team2_players ?? m.team_b ?? m.team2 ?? [];
           if (typeof t2List === 'string') {
             try { t2List = JSON.parse(t2List); } catch (e) { t2List = []; }
           }
@@ -116,9 +119,10 @@ function StandingsPage() {
             });
           }
 
-          // MVP
-          if (m.mvp_player_id && stats[m.mvp_player_id]) {
-            stats[m.mvp_player_id].mvp += 1;
+          // MVP (supporta mvp_player_id e mvp_id)
+          const mvpId = m.mvp_player_id || m.mvp_id;
+          if (mvpId && stats[mvpId]) {
+            stats[mvpId].mvp += 1;
           }
         });
       }
