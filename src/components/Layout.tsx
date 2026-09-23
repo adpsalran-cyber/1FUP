@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useRouterState } from '@tanstack/react-router';
+import { Link, useRouterState, useNavigate } from '@tanstack/react-router';
 import { createClient } from '@supabase/supabase-js';
 import { AuthModal } from './AuthModal';
 import { LeagueModal } from './LeagueModal';
 import { MyLeaguesModal } from './MyLeaguesModal';
+import { ProfileView } from './ProfileView';
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL || '',
@@ -16,6 +17,7 @@ interface LayoutProps {
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const routerState = useRouterState();
+  const navigate = useNavigate();
   const currentPath = routerState.location.pathname;
 
   const [session, setSession] = useState<any>(null);
@@ -31,6 +33,23 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   );
   const [needsProfile, setNeedsProfile] = useState(false);
   const [showMyLeagues, setShowMyLeagues] = useState(false);
+
+  // 1. Salva l'ultima schermata visitata ogni volta che cambia rotta
+  useEffect(() => {
+    if (typeof window !== 'undefined' && currentPath) {
+      localStorage.setItem('alci_last_path', currentPath);
+    }
+  }, [currentPath]);
+
+  // 2. Ripristina l'ultima schermata all'avvio se l'utente atterra sulla root '/'
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !loading && session && leagueId) {
+      const savedPath = localStorage.getItem('alci_last_path');
+      if (savedPath && savedPath !== '/' && currentPath === '/') {
+        navigate({ to: savedPath as any });
+      }
+    }
+  }, [loading, session, leagueId]);
 
   const checkUserStatus = async (user: any) => {
     if (!user) {
@@ -124,6 +143,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     localStorage.removeItem('alci_league_id');
     localStorage.removeItem('active_league_id');
     localStorage.removeItem('alci_user_role');
+    localStorage.removeItem('alci_last_path');
     setSession(null);
     setLeagueId(null);
     setLeagueName('');
@@ -134,6 +154,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     localStorage.removeItem('alci_league_id');
     localStorage.removeItem('active_league_id');
     localStorage.removeItem('alci_user_role');
+    localStorage.removeItem('alci_last_path');
     setLeagueId(null);
     setLeagueName('');
     setNeedsProfile(true);
@@ -176,7 +197,6 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
         {session && (
           <div className="flex items-center gap-2">
-            {/* INGRANAGGIO ADMIN (Visibile solo per Admin) */}
             {isAdmin && (
               <Link
                 to="/admin"
@@ -191,7 +211,6 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               </Link>
             )}
 
-            {/* Tasto Le Mie Leghe */}
             <button
               type="button"
               onClick={() => setShowMyLeagues(true)}
@@ -201,7 +220,6 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               <span>Le mie leghe</span>
             </button>
 
-            {/* Logout */}
             <button
               onClick={handleLogout}
               className="rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-xs font-semibold text-slate-300 hover:bg-red-950/40 hover:text-red-400 hover:border-red-800 transition"
@@ -212,7 +230,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         )}
       </header>
 
-      {/* Main Content */}
+      {/* Contenuto principale gestito dal router */}
       <main className="flex-1 p-4 max-w-lg mx-auto w-full">
         {children}
       </main>
@@ -236,7 +254,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         />
       )}
 
-      {/* League & Profile Modal */}
+      {/* Selezione lega se non attiva */}
       {session && (!leagueId || needsProfile) && (
         <LeagueModal
           userId={session.id}
@@ -251,7 +269,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         />
       )}
 
-      {/* Bottom Navigation Bar: FISSA E PULITA CON I 5 TAB UGUALI PER TUTTI */}
+      {/* Barra inferiore fissa a 5 tab */}
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-800/80 bg-[#121721]/95 backdrop-blur-md py-2">
         <div className="mx-auto flex max-w-lg items-center justify-around px-2">
           <Link
