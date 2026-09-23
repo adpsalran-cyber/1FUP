@@ -157,19 +157,15 @@ function MatchesPage() {
     },
   });
 
-  // CONTROLLO PRIVILEGI: corrisponde all'ingranaggio del pannello di amministrazione
-  // Risulta TRUE solo per te (l'organizzatore/admin) e FALSE per i giocatori normali
+  // CONTROLLO PRIVILEGI ADMIN
   const isLeagueAdmin = typeof window !== 'undefined' && Boolean(
-    // Proprietario della lega su Supabase
     (currentUser?.id && currentLeague?.created_by === currentUser.id) ||
-    // Flag di sessione dell'organizzatore
     localStorage.getItem('alci_is_admin') === 'true' ||
     localStorage.getItem('alci_admin_logged') === 'true' ||
     localStorage.getItem('alci_user_role') === 'admin' ||
     localStorage.getItem('user_role') === 'admin' ||
     localStorage.getItem('league_admin') === 'true' ||
     sessionStorage.getItem('alci_admin') === 'true' ||
-    // Presenza di credenziali di gestione lega nel client
     (localStorage.getItem('alci_username') && localStorage.getItem('alci_username') !== 'ospite')
   );
 
@@ -269,10 +265,8 @@ function MatchesPage() {
     setSavingScore(true);
     try {
       const now = new Date();
-      // Scadenza votazione tra 2 ore esatte
       const deadline = new Date(now.getTime() + 2 * 60 * 60 * 1000).toISOString();
 
-      // 1. Aggiorna partita su Supabase
       const { error: matchError } = await supabase
         .from('matches')
         .update({
@@ -336,7 +330,6 @@ function MatchesPage() {
     const voterId = currentUser?.id || localStorage.getItem('alci_user_id') || 'local_user';
 
     try {
-      // Salva stelle
       for (const [playerId, stars] of Object.entries(userRatings)) {
         await supabase.from('match_ratings').upsert(
           {
@@ -349,7 +342,6 @@ function MatchesPage() {
         );
       }
 
-      // Salva MVP
       if (selectedMvp) {
         await supabase.from('match_mvp_votes').upsert(
           {
@@ -398,7 +390,6 @@ function MatchesPage() {
     }
   };
 
-  // Controlla se le votazioni sono ancora aperte (entro 2 ore)
   const isVotingOpen = (match: any) => {
     if (!match?.voting_deadline) return false;
     return new Date(match.voting_deadline).getTime() > Date.now();
@@ -478,7 +469,6 @@ function MatchesPage() {
                     <span className="bg-amber-400/10 border border-amber-400/30 text-amber-400 text-[10px] font-bold px-2 py-0.5 rounded">
                       DA GIOCARE
                     </span>
-                    {/* Tasto elimina: mostrato solo se sei l'admin */}
                     {isLeagueAdmin && (
                       <button
                         type="button"
@@ -599,6 +589,11 @@ function MatchesPage() {
                   onClick={() => setSelectedMatch(m)}
                   className="bg-[#131926] border border-[#20293d] rounded-2xl p-5 shadow-xl hover:border-slate-600 transition cursor-pointer space-y-3"
                 >
+                  {/* BOX VISIVO DI DEBUG */}
+                  <div className="bg-red-500/10 border border-red-500/30 rounded p-1 text-[9px] font-mono text-red-300 truncate">
+                    ADMIN: {String(isLeagueAdmin)} | KEYS: {typeof window !== 'undefined' ? Object.keys(localStorage).join(', ') : ''}
+                  </div>
+
                   <div className="flex justify-between items-center text-xs">
                     <span className="font-mono text-slate-400">
                       {new Date(m.created_at).toLocaleDateString('it-IT')}
