@@ -10,7 +10,41 @@ export const Route = createRoute({
   component: MatchesPage,
 });
 
-// Componente per le 5 stelle con mezze stelle (valori da 0.5 a 5.0 a passi di 0.5)
+// Componente SVG puro per renderizzare stella piena, mezza o vuota senza glitch di font
+function StarIcon({ type }: { type: 'full' | 'half' | 'empty' }) {
+  if (type === 'empty') {
+    return (
+      <svg className="w-6 h-6 text-slate-600 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+      </svg>
+    );
+  }
+
+  if (type === 'half') {
+    return (
+      <div className="relative w-6 h-6">
+        {/* Sagoma di base vuota */}
+        <svg className="w-6 h-6 text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+        </svg>
+        {/* Metà sinistra riempita in oro */}
+        <div className="absolute top-0 left-0 w-1/2 h-full overflow-hidden">
+          <svg className="w-6 h-6 text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.6)]" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+          </svg>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <svg className="w-6 h-6 text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.6)]" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+    </svg>
+  );
+}
+
+// Componente StarRating con aree touch ottimizzate per mobile
 function StarRating({
   value,
   onChange,
@@ -23,40 +57,58 @@ function StarRating({
   const stars = [1, 2, 3, 4, 5];
 
   return (
-    <div className="flex items-center gap-0.5 select-none">
+    <div className="flex items-center gap-1 select-none py-1">
       {stars.map((starIndex) => {
         const fullVal = starIndex;
         const halfVal = starIndex - 0.5;
         const isFull = value >= fullVal;
         const isHalf = !isFull && value >= halfVal;
 
+        const starType: 'full' | 'half' | 'empty' = isFull ? 'full' : isHalf ? 'half' : 'empty';
+
         return (
           <div
             key={starIndex}
-            className={`relative flex items-center justify-center text-xl cursor-pointer ${
+            className={`relative flex items-center justify-center p-0.5 cursor-pointer touch-manipulation active:scale-95 transition-transform ${
               disabled ? 'pointer-events-none opacity-80' : ''
             }`}
           >
-            {/* Metà sinistra cliccabile (0.5) */}
-            <span
-              onClick={() => !disabled && onChange && onChange(halfVal)}
+            {/* Metà sinistra (0.5) */}
+            <button
+              type="button"
+              aria-label={`${halfVal} stelle`}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!disabled && onChange) {
+                  onChange(value === halfVal ? fullVal : halfVal);
+                }
+              }}
               className="absolute left-0 top-0 w-1/2 h-full z-10"
-              title={`${halfVal} stelle`}
-            />
-            {/* Metà destra cliccabile (1.0) */}
-            <span
-              onClick={() => !disabled && onChange && onChange(fullVal)}
-              className="absolute right-0 top-0 w-1/2 h-full z-10"
-              title={`${fullVal} stelle`}
             />
 
-            {/* Render grafico stella (Piena, Mezza o Vuota) */}
-            <span className="leading-none text-amber-400">
-              {isFull ? '★' : isHalf ? '⯨' : '☆'}
-            </span>
+            {/* Metà destra (1.0) */}
+            <button
+              type="button"
+              aria-label={`${fullVal} stelle`}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!disabled && onChange) {
+                  onChange(value === fullVal ? halfVal : fullVal);
+                }
+              }}
+              className="absolute right-0 top-0 w-1/2 h-full z-10"
+            />
+
+            {/* Icona SVG */}
+            <StarIcon type={starType} />
           </div>
         );
       })}
+
+      {/* Voto numerico visualizzato accanto */}
+      <span className="text-xs font-mono text-amber-400 font-bold ml-1.5 min-w-[20px]">
+        {value > 0 ? (value * 2).toFixed(0) : '-'}
+      </span>
     </div>
   );
 }
