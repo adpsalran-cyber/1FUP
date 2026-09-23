@@ -230,3 +230,30 @@ export async function setMatchMvp(
   if (error) throw new Error(error.message);
   await queryClient.invalidateQueries({ queryKey: queryKeys.matchDetail(matchId) });
 }
+
+// Nuova funzione per cancellare partite in programma (non intacca classifiche o partite concluse)
+export async function deleteScheduledMatch(
+  queryClient: QueryClient,
+  matchId: string,
+  leagueId?: string
+) {
+  // 1. Elimina eventuali dipendenze collegate (giocatori assegnati a questa partita)
+  await supabase.from('match_players').delete().eq('match_id', matchId);
+
+  // 2. Rimuove la partita solo ed esclusivamente se è in stato 'scheduled'
+  const { error } = await supabase
+    .from('matches')
+    .delete()
+    .eq('id', matchId)
+    .eq('status', 'scheduled');
+
+  if (error) throw new Error(error.message);
+
+  // 3. Svuota la cache di React Query per aggiornare la grafica all'istante
+  if (leagueId) {
+    await queryClient.invalidateQueries({ queryKey: queryKeys.matches(leagueId) });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.nextMatchWidget(leagueId) });
+  }
+  await queryClient.invalidateQueries({ queryKey: queryKeys.matchDetail(matchId) });
+  await queryClient.invalidateQueries({ queryKey: ['upcoming_match_home'] });
+}
