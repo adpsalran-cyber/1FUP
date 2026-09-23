@@ -65,7 +65,7 @@ function StandingsPage() {
         };
       });
 
-      // Ordinamento: Punti DESC, poi Vittorie DESC, poi MVP DESC
+      // Ordinamento: Punti DESC, Vittorie DESC, MVP DESC, PG ASC, Nome ASC
       rows.sort((a, b) => {
         if (b.punti !== a.punti) return b.punti - a.punti;
         if (b.v !== a.v) return b.v - a.v;
@@ -78,107 +78,93 @@ function StandingsPage() {
   });
 
   return (
-    <div className="space-y-5 pb-24 max-w-lg mx-auto">
-      {/* Header */}
+    <div className="space-y-4 pb-24 max-w-lg mx-auto">
+      {/* Header Schermata */}
       <div className="flex justify-between items-end border-b border-slate-800 pb-3">
         <div>
-          <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
-            {season?.name || 'STAGIONE IN CORSO'}
+          <span className="text-[10px] font-bold text-white uppercase tracking-wider block">
+            {season?.name || 'STAGIONE GENERALE'}
           </span>
-          <h1 className="font-bebas text-4xl text-slate-100 tracking-wider">CLASSIFICA</h1>
+          <h1 className="font-bebas text-4xl text-white tracking-wider">CLASSIFICA</h1>
         </div>
-        <span className="text-[10px] font-bold text-slate-400 font-mono bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700">
-          TOTALE: {standings?.length || 0}
+        <span className="text-xs font-mono text-white">
+          Totale: <strong>{standings?.length || 0}</strong>
         </span>
       </div>
 
-      {/* Tabella Classifica */}
+      {/* Tabella Classifica Minimale & Bianca */}
       {isLoading ? (
-        <div className="text-center py-12 text-amber-400 font-bebas text-xl animate-pulse">
+        <div className="text-center py-12 text-white font-bebas text-xl animate-pulse">
           CARICAMENTO CLASSIFICA...
         </div>
       ) : !standings || standings.length === 0 ? (
-        <div className="text-center py-10 bg-[#131926] border border-slate-800 rounded-2xl text-slate-400 text-xs italic">
-          Nessun giocatore registrato nella lega. Aggiungili dal pannello Admin!
+        <div className="text-center py-10 bg-[#131926] border border-slate-800 rounded-2xl text-white text-xs italic">
+          Nessun giocatore registrato nella lega.
         </div>
       ) : (
-        <div className="bg-[#131926] border border-[#20293d] rounded-2xl overflow-hidden shadow-2xl">
+        <div className="bg-[#131926] border border-[#20293d] rounded-2xl overflow-hidden shadow-xl">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="border-b border-[#20293d] bg-[#0d121c] text-slate-400 font-bold text-[10px] uppercase tracking-wider">
+                <tr className="border-b border-[#20293d] bg-[#0d121c] text-white font-bold text-[11px] tracking-wider">
                   <th className="py-3 px-3 text-center w-8">#</th>
-                  <th className="py-3 px-3">Giocatore</th>
-                  <th className="py-3 px-2 text-center" title="Partite Giocate">PG</th>
-                  <th className="py-3 px-2 text-center text-emerald-400" title="Vittorie">V</th>
-                  <th className="py-3 px-2 text-center text-amber-400" title="Pareggi">P</th>
-                  <th className="py-3 px-2 text-center text-rose-400" title="Sconfitte">S</th>
-                  <th className="py-3 px-2 text-center text-yellow-300" title="MVP">MVP</th>
-                  <th className="py-3 px-3 text-center text-amber-400 font-black">PUNTI</th>
+                  <th className="py-3 px-3 text-white">GIOCATORE</th>
+                  <th className="py-3 px-2 text-center text-white" title="Partite Giocate">PG</th>
+                  <th className="py-3 px-2 text-center text-white" title="Vittorie">V</th>
+                  <th className="py-3 px-2 text-center text-white" title="Pareggi">P</th>
+                  <th className="py-3 px-2 text-center text-white" title="Sconfitte">S</th>
+                  <th className="py-3 px-2 text-center text-white" title="MVP">MVP</th>
+                  <th className="py-3 px-3 text-center text-white font-black">PUNTI</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#20293d]/60 font-mono text-slate-200">
+              <tbody className="divide-y divide-[#20293d]/60 font-mono text-white">
                 {standings.map((player: any, idx: number) => {
                   const rank = idx + 1;
-                  const isPodium = rank <= 3;
-                  const rankColor =
-                    rank === 1
-                      ? 'text-amber-400 font-bold'
-                      : rank === 2
-                      ? 'text-slate-300 font-bold'
-                      : rank === 3
-                      ? 'text-amber-600 font-bold'
-                      : 'text-slate-500';
 
                   return (
-                    <tr key={player.id} className="hover:bg-[#1a2233]/50 transition">
-                      {/* Posizione */}
-                      <td className={`py-3 px-3 text-center font-bebas text-base ${rankColor}`}>
+                    <tr key={player.id} className="hover:bg-[#1a2233]/40 transition">
+                      {/* Posizione (Numero semplice bianco) */}
+                      <td className="py-3 px-3 text-center font-bebas text-base text-white">
                         {rank}
                       </td>
 
-                      {/* Nome Giocatore e Ruolo */}
+                      {/* Nome Giocatore e Ruolo (Senza medaglie o badge) */}
                       <td className="py-3 px-3 font-sans">
-                        <div className="font-bold text-slate-100 flex items-center gap-1.5 truncate max-w-[120px] sm:max-w-[150px]">
+                        <div className="font-bold text-white truncate max-w-[130px] sm:max-w-[160px]">
                           {player.name}
-                          {isPodium && (
-                            <span className="text-[10px]">
-                              {rank === 1 ? '🥇' : rank === 2 ? '🥈' : '🥉'}
-                            </span>
-                          )}
                         </div>
-                        <span className="text-[9px] text-slate-500 font-mono uppercase">
+                        <div className="text-[10px] text-white/70 font-mono uppercase">
                           {player.role}
-                        </span>
+                        </div>
                       </td>
 
                       {/* Partite Giocate */}
-                      <td className="py-3 px-2 text-center text-slate-300 font-medium">
+                      <td className="py-3 px-2 text-center text-white">
                         {player.pg}
                       </td>
 
                       {/* Vittorie */}
-                      <td className="py-3 px-2 text-center text-emerald-400 font-bold">
+                      <td className="py-3 px-2 text-center text-white font-bold">
                         {player.v}
                       </td>
 
                       {/* Pareggi */}
-                      <td className="py-3 px-2 text-center text-amber-300">
+                      <td className="py-3 px-2 text-center text-white">
                         {player.p}
                       </td>
 
                       {/* Sconfitte */}
-                      <td className="py-3 px-2 text-center text-rose-400">
+                      <td className="py-3 px-2 text-center text-white">
                         {player.s}
                       </td>
 
                       {/* MVP */}
-                      <td className="py-3 px-2 text-center text-yellow-300 font-bold">
+                      <td className="py-3 px-2 text-center text-white font-bold">
                         {player.mvp}
                       </td>
 
                       {/* Punti */}
-                      <td className="py-3 px-3 text-center font-bebas text-lg text-amber-400 font-bold">
+                      <td className="py-3 px-3 text-center font-bebas text-lg text-white font-bold">
                         {player.punti}
                       </td>
                     </tr>
