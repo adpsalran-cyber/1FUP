@@ -38,18 +38,26 @@ function HomePage() {
     refetchInterval: 30000,
   });
 
-  // 2. Tutti i sondaggi/date aperti per la compattazione settimanale
+  // 2. Tutti i sondaggi aperti dalla tabella reale "polls"
   const { data: activePolls } = useQuery({
     queryKey: ['active_polls_home', activeLeagueId],
     queryFn: async () => {
-      if (!activeLeagueId) return [];
-      const { data } = await supabase
-        .from('match_polls')
-        .select('*')
-        .eq('league_id', activeLeagueId)
-        .eq('status', 'open')
-        .order('match_date', { ascending: true });
-      return data || [];
+      try {
+        let query = supabase
+          .from('polls')
+          .select('*')
+          .eq('is_closed', false);
+
+        if (activeLeagueId) {
+          query = query.or(`league_id.eq.${activeLeagueId},league_id.is.null`);
+        }
+
+        const { data, error } = await query.order('created_at', { ascending: false });
+        if (error || !data) return [];
+        return data;
+      } catch {
+        return [];
+      }
     },
   });
 
@@ -70,7 +78,7 @@ function HomePage() {
     },
   });
 
-  const now = new Date();
+  const todayStr = new Date().toISOString().split('T')[0];
 
   return (
     <div className="space-y-6 pb-24 max-w-lg mx-auto">
@@ -113,7 +121,7 @@ function HomePage() {
         </div>
       )}
 
-      {/* CARD UNICA COMPATTA: DISPONIBILITÀ & PROSSIME PARTITE */}
+      {/* CARD UNICA COMPATTA: CONVOCAZIONI & DISPONIBILITÀ SETTIMANALE */}
       {activePolls && activePolls.length > 0 && (
         <div className="bg-[#131926] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
           <div className="flex justify-between items-center border-b border-slate-800/80 pb-2">
@@ -122,7 +130,7 @@ function HomePage() {
                 CONVOCAZIONI & DISPONIBILITÀ
               </span>
               <h2 className="font-bebas text-2xl text-white tracking-wide">
-                CALENDARIO SETTIMANALE
+                CALENDARIO SONDAGGI
               </h2>
             </div>
             <span className="text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full">
@@ -136,16 +144,27 @@ function HomePage() {
 
           <div className="space-y-2">
             {activePolls.map((poll: any) => {
-              const pollDate = poll.match_date ? new Date(poll.match_date) : null;
-              const isPast = pollDate ? pollDate < new Date(now.getFullYear(), now.getMonth(), now.getDate()) : false;
+              const dateVal = poll.target_date;
+              const isPast = Boolean(dateVal && typeof dateVal === 'string' && dateVal < todayStr);
               const isSelected = selectedPollId === poll.id;
 
-              const dayName = pollDate
-                ? pollDate.toLocaleDateString('it-IT', { weekday: 'long' })
-                : poll.title || 'Partita';
-              const formattedDate = pollDate
-                ? pollDate.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })
-                : '';
+              // Parsing sicuro della data in italiano
+              let dayLabel = poll.title || 'Partita';
+              let formattedDate = '';
+              if (dateVal && typeof dateVal === 'string') {
+                const parts = dateVal.split('-');
+                if (parts.length === 3) {
+                  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+                  if (!isNaN(d.getTime())) {
+                    dayLabel = d.toLocaleDateString('it-IT', { weekday: 'long' });
+                    formattedDate = d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
+                  }
+                }
+              }
+
+              const slots: string[] = Array.isArray(poll.time_slots) && poll.time_slots.length > 0
+                ? poll.time_slots
+                : ['19:30', '20:00', '20:30', '21:00', '21:30', '22:00'];
 
               return (
                 <div
@@ -165,13 +184,13 @@ function HomePage() {
                     className="w-full flex items-center justify-between p-3.5 text-left"
                   >
                     <div className="flex items-center gap-3">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]" />
+                      <span className={`w-2 h-2 rounded-full ${isPast ? 'bg-slate-600' : 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]'}`} />
                       <div>
                         <div className="font-bebas text-lg tracking-wide text-white capitalize leading-tight">
-                          {dayName} {formattedDate && <span className="text-slate-400 font-sans text-xs font-normal">({formattedDate})</span>}
+                          {dayLabel} {formattedDate && <span className="text-slate-400 font-sans text-xs font-normal">({formattedDate})</span>}
                         </div>
                         <div className="text-[11px] text-slate-400 truncate">
-                          {poll.title && poll.title !== dayName ? poll.title : 'Seleziona fascia oraria'}
+                          {poll.title && poll.title !== dayLabel ? poll.title : 'Seleziona fascia oraria'}
                         </div>
                       </div>
                     </div>
@@ -184,7 +203,7 @@ function HomePage() {
                       ) : (
                         <span className={`text-[10px] font-bold uppercase px-2.5 py-1 rounded-md transition ${
                           isSelected
-                            ? 'bg-amber-400 text-slate-950'
+                            ? 'bg-amber-400 text-slate-950 font-bold'
                             : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                         }`}>
                           {isSelected ? 'Chiudi ▲' : 'Prenotati ▼'}
@@ -193,21 +212,30 @@ function HomePage() {
                     </div>
                   </button>
 
-                  {/* Finestra a comparsa con orari e conferma */}
+                  {/* Finestra a comparsa con orari e link diretto al sondaggio */}
                   {isSelected && !isPast && (
-                    <div className="px-3.5 pb-3.5 pt-2 border-t border-slate-700/60 space-y-2 bg-[#121824]">
-                      <div className="text-xs text-slate-300 flex items-center justify-between">
-                        <span>Orario / Opzioni:</span>
-                        <span className="text-amber-400 font-mono font-semibold">
-                          {poll.match_time || 'Orario da definire'}
+                    <div className="px-3.5 pb-3.5 pt-2 border-t border-slate-700/60 space-y-3 bg-[#121824]">
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1.5">
+                          Orari Disponibili:
                         </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {slots.map((slot) => (
+                            <span
+                              key={slot}
+                              className="px-2 py-0.5 rounded text-xs font-mono bg-[#0b0e14] text-amber-400 border border-[#222c42]"
+                            >
+                              {slot}
+                            </span>
+                          ))}
+                        </div>
                       </div>
 
                       <Link
-                        to="/matches"
+                        to="/polls"
                         className="inline-block w-full text-center py-2 bg-gradient-to-r from-amber-400 to-amber-300 text-slate-950 font-bebas text-sm rounded-lg font-bold tracking-wider transition hover:brightness-105 shadow"
                       >
-                        CONFERMA PRESENZA ➔
+                        VAI AL SONDAGGIO & CONFERMA ➔
                       </Link>
                     </div>
                   )}
