@@ -32,59 +32,91 @@ function StandingsPage() {
   });
 
   // 2. Recupera tutti i giocatori della lega e calcola dalle partite giocate
-  const { data: standings, isLoading } = useQuery({
+  const { data: standings, isLoading, refetch } = useQuery({
     queryKey: ['standings_table', activeLeagueId],
     queryFn: async () => {
       if (!activeLeagueId) return [];
 
       // A. Tutti i giocatori della rosa
-      const { data: players, error } = await supabase
+      const { data: players, error: pErr } = await supabase
         .from('players')
         .select('*')
         .eq('league_id', activeLeagueId);
 
-      if (error || !players) return [];
+      if (pErr || !players) return [];
 
-      // B. Tutte le partite concluse
+      // B. Tutte le partite della lega
       const { data: matches } = await supabase
         .from('matches')
         .select('*')
-        .eq('league_id', activeLeagueId)
-        .eq('status', 'completed');
+        .eq('league_id', activeLeagueId);
 
-      // Mappa statistiche inizializzata a 0 per tutti
+      // Inizializza mappa statistiche a 0 per tutti
       const stats: Record<string, { pg: number; v: number; p: number; s: number; mvp: number }> = {};
       players.forEach((p: any) => {
         stats[p.id] = { pg: 0, v: 0, p: 0, s: 0, mvp: Number(p.mvp_count || 0) };
       });
 
-      // Calcola presenze, esiti e punti dalle partite registrate
+      // Funzione helper per estrarre l'ID di un giocatore sia se è un oggetto sia se è già una stringa UUID
+      const extractId = (item: any): string | null => {
+        if (!item) return null;
+        if (typeof item === 'string') return item;
+        if (typeof item === 'object' && item.id) return item.id;
+        return null;
+      };
+
+      // C. Calcola i risultati da qualsiasi partita conclusa
       if (matches && matches.length > 0) {
         matches.forEach((m: any) => {
+          // Considera conclusa se lo status è completed/finished oppure se ha un punteggio impostato
+          const isCompleted =
+            m.status === 'completed' ||
+            m.status === 'finished' ||
+            (m.score_team1 !== null && m.score_team2 !== null && (m.score_team1 > 0 || m.score_team2 > 0 || m.status !== 'scheduled'));
+
+          if (!isCompleted) return;
+
           const s1 = Number(m.score_team1 ?? 0);
           const s2 = Number(m.score_team2 ?? 0);
           const isDraw = s1 === s2;
           const t1Won = s1 > s2;
           const t2Won = s2 > s1;
 
-          (m.team1_players || []).forEach((p: any) => {
-            if (p?.id && stats[p.id]) {
-              stats[p.id].pg += 1;
-              if (isDraw) stats[p.id].p += 1;
-              else if (t1Won) stats[p.id].v += 1;
-              else stats[p.id].s += 1;
-            }
-          });
+          // Gestione team1
+          let t1List = m.team1_players;
+          if (typeof t1List === 'string') {
+            try { t1List = JSON.parse(t1List); } catch (e) { t1List = []; }
+          }
+          if (Array.isArray(t1List)) {
+            t1List.forEach((rawP: any) => {
+              const pId = extractId(rawP);
+              if (pId && stats[pId]) {
+                stats[pId].pg += 1;
+                if (isDraw) stats[pId].p += 1;
+                else if (t1Won) stats[pId].v += 1;
+                else stats[pId].s += 1;
+              }
+            });
+          }
 
-          (m.team2_players || []).forEach((p: any) => {
-            if (p?.id && stats[p.id]) {
-              stats[p.id].pg += 1;
-              if (isDraw) stats[p.id].p += 1;
-              else if (t2Won) stats[p.id].v += 1;
-              else stats[p.id].s += 1;
-            }
-          });
+          // Gestione team2
+          let t2List = m.team2_players;
+          if (typeof t2List === 'string') {
+            try { t2List = JSON.parse(t2List); } catch (e) { t2List = []; }
+          }
+          if (Array.isArray(t2List)) {
+            t2List.forEach((rawP: any) => {
+              const pId = extractId(rawP);
+              if (pId && stats[pId]) {
+                stats[pId].pg += 1;
+                if (isDraw) stats[pId].p += 1;
+                else if (t2Won) stats[pId].v += 1;
+                else stats[pId].s += 1;
+              }
+            });
+          }
 
+          // MVP
           if (m.mvp_player_id && stats[m.mvp_player_id]) {
             stats[m.mvp_player_id].mvp += 1;
           }
@@ -129,9 +161,13 @@ function StandingsPage() {
           </span>
           <h1 className="font-bebas text-4xl text-white tracking-wider">CLASSIFICA</h1>
         </div>
-        <span className="text-xs font-mono text-white">
-          Totale: <strong>{standings?.length || 0}</strong>
-        </span>
+        <button
+          type="button"
+          onClick={() => refetch()}
+          className="text-xs font-mono text-white bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700 hover:border-amber-400 transition"
+        >
+          Aggiorna
+        </button>
       </div>
 
       {/* Tabella Classifica Minimale & Bianca */}
