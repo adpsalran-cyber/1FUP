@@ -58,7 +58,7 @@ function StandingsPage() {
         stats[p.id] = { pg: 0, v: 0, p: 0, s: 0, mvp: Number(p.mvp_count || 0) };
       });
 
-      // Se ci sono partite registrate, calcola presenze, esiti e punti
+      // Calcola presenze, esiti e punti dalle partite registrate
       if (matches && matches.length > 0) {
         matches.forEach((m: any) => {
           const s1 = Number(m.score_team1 ?? 0);
@@ -106,19 +106,6 @@ function StandingsPage() {
           punti,
         };
       });
-
-      // Ordinamento: Punti DESC, Vittorie DESC, MVP DESC, PG ASC, Nome ASC
-      rows.sort((a, b) => {
-        if (b.punti !== a.punti) return b.punti - a.punti;
-        if (b.v !== a.v) return b.v - a.v;
-        if (b.mvp !== a.mvp) return b.mvp - a.mvp;
-        return a.pg - b.pg;
-      });
-
-      return rows;
-    },
-  });
-
 
       // Ordinamento: Punti DESC, Vittorie DESC, MVP DESC, PG ASC, Nome ASC
       rows.sort((a, b) => {
@@ -183,7 +170,7 @@ function StandingsPage() {
                         {rank}
                       </td>
 
-                      {/* Nome Giocatore Grande (Senza ruolo o altro) */}
+                      {/* Nome Giocatore Grande */}
                       <td className="py-3 px-3 font-sans">
                         <span className="font-bold text-base text-white truncate block max-w-[140px] sm:max-w-[180px]">
                           {player.name}
