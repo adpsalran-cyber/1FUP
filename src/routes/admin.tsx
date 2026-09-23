@@ -30,9 +30,10 @@ function AdminPage() {
   ]);
   const [creatingPoll, setCreatingPoll] = useState(false);
 
-  // --- 3. CREAZIONE GIOCATORE / DUMMY ---
+  // --- 3. CREAZIONE GIOCATORE / DUMMY / ARCHETIPO ---
   const [playerName, setPlayerName] = useState('');
   const [playerRole, setPlayerRole] = useState('ATT');
+  const [playerArchetype, setPlayerArchetype] = useState('Cecchino');
   const [playerOverall, setPlayerOverall] = useState(70);
   const [isDummy, setIsDummy] = useState(false);
   const [creatingPlayer, setCreatingPlayer] = useState(false);
@@ -126,7 +127,6 @@ function AdminPage() {
     if (!pollTitle.trim() || !activeLeagueId) return;
     setCreatingPoll(true);
     try {
-      // 1. Crea il sondaggio
       const fullTitle = pollDate ? `${pollTitle.trim()} (${pollDate})` : pollTitle.trim();
       const { data: pollData, error: pollErr } = await supabase
         .from('match_polls')
@@ -140,7 +140,6 @@ function AdminPage() {
 
       if (pollErr) throw pollErr;
 
-      // 2. Inserisci i 6 slot orari
       const optionsToInsert = timeSlots
         .filter((slot) => slot.trim() !== '')
         .map((slot, idx) => ({
@@ -185,6 +184,7 @@ function AdminPage() {
         league_id: activeLeagueId,
         name: playerName.trim(),
         role: playerRole,
+        archetype: playerArchetype,
         overall: Number(playerOverall),
         attributes: defaultAttrs,
         is_dummy: isDummy,
@@ -197,9 +197,10 @@ function AdminPage() {
       setIsDummy(false);
       refetchPlayers();
       queryClient.invalidateQueries({ queryKey: ['players_list'] });
-      alert(isDummy ? 'Giocatore Fittizio (Bot) aggiunto!' : 'Giocatore aggiunto alla rosa!');
+      queryClient.invalidateQueries({ queryKey: ['standings_table'] });
+      alert(isDummy ? '🤖 Giocatore Fittizio (Bot) aggiunto!' : '👤 Cartellino giocatore creato!');
     } catch (err: any) {
-      alert(`Errore: ${err.message}`);
+      alert(`Errore creazione giocatore: ${err.message}`);
     } finally {
       setCreatingPlayer(false);
     }
@@ -420,7 +421,6 @@ function AdminPage() {
               />
             </div>
 
-            {/* 6 Slot Orari Personalizzabili */}
             <div className="space-y-1.5 pt-1">
               <label className="text-[11px] text-amber-400 font-bold uppercase block">
                 6 Orari Selezionabili (Personalizza)
@@ -450,7 +450,6 @@ function AdminPage() {
             </button>
           </form>
 
-          {/* Elenco Sondaggi */}
           <div className="pt-2 border-t border-slate-800 space-y-2">
             <span className="text-[10px] font-bold text-slate-400 uppercase block">Sondaggi Creati</span>
             {polls && polls.length > 0 ? (
@@ -548,43 +547,70 @@ function AdminPage() {
         </div>
       )}
 
-      {/* 3. SEZIONE GESTIONE GIOCATORI & BOT */}
+      {/* 3. SEZIONE GESTIONE GIOCATORI & BOT (CON ARCHETIPI) */}
       {activeTab === 'players' && (
         <div className="space-y-4">
           <div className="bg-[#131926] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
             <h2 className="font-bebas text-2xl text-white">NUOVO GIOCATORE / BOT FITTIZIO</h2>
             <form onSubmit={handleCreatePlayer} className="space-y-3">
               <div>
+                <label className="text-[11px] text-slate-400 font-bold uppercase block mb-1">Nome o Nickname</label>
                 <input
                   type="text"
-                  placeholder="Nome (es. Marco o Bot Difesa)"
+                  placeholder="Es. Marco o Bot Difesa"
                   value={playerName}
                   onChange={(e) => setPlayerName(e.target.value)}
                   className="w-full bg-[#0b0e14] border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-400"
                   required
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <select
-                  value={playerRole}
-                  onChange={(e) => setPlayerRole(e.target.value)}
-                  className="bg-[#0b0e14] border border-slate-700 text-white rounded-xl px-3 py-2 text-xs"
-                >
-                  <option value="POR">Portiere (POR)</option>
-                  <option value="DIF">Difensore (DIF)</option>
-                  <option value="CEN">Centrocampista (CEN)</option>
-                  <option value="ATT">Attaccante (ATT)</option>
-                  <option value="UNI">Universale (UNI)</option>
-                </select>
-                <input
-                  type="number"
-                  min="50"
-                  max="99"
-                  value={playerOverall}
-                  onChange={(e) => setPlayerOverall(Number(e.target.value))}
-                  placeholder="OVR (es. 72)"
-                  className="bg-[#0b0e14] border border-slate-700 text-white rounded-xl px-3 py-2 text-xs"
-                />
+
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Ruolo</label>
+                  <select
+                    value={playerRole}
+                    onChange={(e) => setPlayerRole(e.target.value)}
+                    className="w-full bg-[#0b0e14] border border-slate-700 text-white rounded-xl px-2 py-2 text-xs"
+                  >
+                    <option value="POR">Portiere (POR)</option>
+                    <option value="DIF">Difensore (DIF)</option>
+                    <option value="CEN">Centrocampista (CEN)</option>
+                    <option value="ATT">Attaccante (ATT)</option>
+                    <option value="UNI">Universale (UNI)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Archetipo</label>
+                  <select
+                    value={playerArchetype}
+                    onChange={(e) => setPlayerArchetype(e.target.value)}
+                    className="w-full bg-[#0b0e14] border border-slate-700 text-white rounded-xl px-2 py-2 text-xs"
+                  >
+                    <option value="Saracinesca">Saracinesca</option>
+                    <option value="Muro">Muro Difensivo</option>
+                    <option value="Metronomo">Metronomo</option>
+                    <option value="Motorino">Motorino</option>
+                    <option value="Fantasista">Fantasista</option>
+                    <option value="Cecchino">Cecchino</option>
+                    <option value="Pivot">Pivot</option>
+                    <option value="Equilibrato">Equilibrato</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Overall</label>
+                  <input
+                    type="number"
+                    min="50"
+                    max="99"
+                    value={playerOverall}
+                    onChange={(e) => setPlayerOverall(Number(e.target.value))}
+                    placeholder="OVR (70)"
+                    className="w-full bg-[#0b0e14] border border-slate-700 text-white rounded-xl px-2 py-2 text-xs"
+                  />
+                </div>
               </div>
 
               <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer pt-1">
@@ -617,7 +643,7 @@ function AdminPage() {
                       {p.name} {p.is_dummy ? '🤖' : ''}
                     </span>
                     <span className="text-[10px] text-slate-400">
-                      {p.role} • OVR {p.overall || 70}
+                      {p.role} • {p.archetype || 'Equilibrato'} • OVR {p.overall || 70}
                     </span>
                   </div>
                   <button
