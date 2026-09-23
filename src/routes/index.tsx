@@ -89,9 +89,9 @@ function HomePage() {
 
   return (
     <div className="space-y-6 pb-24 max-w-lg mx-auto">
-      {/* Banner Titolo */}
+      {/* Banner Titolo con colore di test ciano */}
       <div className="border-b border-slate-800 pb-3">
-        <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
+        <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider block">
           CENTRO SPORTIVO
         </span>
         <h1 className="font-bebas text-4xl text-white tracking-wider">HUB PRINCIPALE</h1>
