@@ -26,6 +26,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       : null
   );
   const [leagueName, setLeagueName] = useState<string>('');
+  const [userRole, setUserRole] = useState<string>(
+    typeof window !== 'undefined' ? localStorage.getItem('alci_user_role') || 'member' : 'member'
+  );
   const [needsProfile, setNeedsProfile] = useState(false);
   const [showMyLeagues, setShowMyLeagues] = useState(false);
 
@@ -53,14 +56,16 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
     if (membership && membership.league_id) {
       const lid = membership.league_id;
+      const role = membership.role || 'member';
       setLeagueId(lid);
+      setUserRole(role);
       localStorage.setItem('alci_league_id', lid);
       localStorage.setItem('active_league_id', lid);
-      localStorage.setItem('alci_user_role', membership.role || 'member');
+      localStorage.setItem('alci_user_role', role);
       const lName = (membership.leagues as any)?.name || 'La Mia Lega';
       setLeagueName(lName);
 
-      if (membership.role === 'admin') {
+      if (role === 'admin') {
         setNeedsProfile(false);
         setLoading(false);
         return;
@@ -83,10 +88,13 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         .maybeSingle();
 
       if (anyMembership?.league_id) {
-        setLeagueId(anyMembership.league_id);
-        localStorage.setItem('alci_league_id', anyMembership.league_id);
-        localStorage.setItem('active_league_id', anyMembership.league_id);
-        localStorage.setItem('alci_user_role', anyMembership.role || 'member');
+        const lid = anyMembership.league_id;
+        const role = anyMembership.role || 'member';
+        setLeagueId(lid);
+        setUserRole(role);
+        localStorage.setItem('alci_league_id', lid);
+        localStorage.setItem('active_league_id', lid);
+        localStorage.setItem('alci_user_role', role);
         setLeagueName((anyMembership.leagues as any)?.name || 'La Mia Lega');
         setNeedsProfile(false);
       } else {
@@ -111,7 +119,6 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Logout totale dall'account
   const handleLogout = async () => {
     await supabase.auth.signOut();
     localStorage.removeItem('alci_league_id');
@@ -123,7 +130,6 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     setNeedsProfile(false);
   };
 
-  // Uscita dalla singola lega SENZA disconnettere l'utente
   const handleExitCurrentLeague = () => {
     localStorage.removeItem('alci_league_id');
     localStorage.removeItem('active_league_id');
@@ -134,12 +140,12 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     setShowMyLeagues(false);
   };
 
-  // Cambio attivo a un'altra lega
   const handleSelectLeague = (lid: string, role: string, name: string) => {
     localStorage.setItem('alci_league_id', lid);
     localStorage.setItem('active_league_id', lid);
     localStorage.setItem('alci_user_role', role);
     setLeagueId(lid);
+    setUserRole(role);
     setLeagueName(name);
     setNeedsProfile(false);
     window.location.reload();
@@ -152,6 +158,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       </div>
     );
   }
+
+  const isAdmin = userRole === 'admin';
 
   return (
     <div className="flex min-h-screen flex-col bg-[#0b0e14] text-slate-100 font-sans pb-24">
@@ -168,6 +176,21 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
         {session && (
           <div className="flex items-center gap-2">
+            {/* INGRANAGGIO ADMIN (Visibile solo per Admin) */}
+            {isAdmin && (
+              <Link
+                to="/admin"
+                className={`p-1.5 rounded-lg border transition flex items-center justify-center ${
+                  currentPath === '/admin'
+                    ? 'bg-amber-400 text-slate-950 border-amber-400 shadow'
+                    : 'bg-[#151b28] border-slate-700 text-amber-400 hover:border-amber-400'
+                }`}
+                title="Pannello Amministrazione"
+              >
+                <span className="text-base leading-none">⚙️</span>
+              </Link>
+            )}
+
             {/* Tasto Le Mie Leghe */}
             <button
               type="button"
@@ -178,7 +201,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               <span>Le mie leghe</span>
             </button>
 
-            {/* Logout Completo */}
+            {/* Logout */}
             <button
               onClick={handleLogout}
               className="rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-xs font-semibold text-slate-300 hover:bg-red-950/40 hover:text-red-400 hover:border-red-800 transition"
@@ -204,7 +227,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         />
       )}
 
-      {/* Auth Modal se non loggato */}
+      {/* Auth Modal */}
       {!session && (
         <AuthModal
           onSuccess={() => {
@@ -213,7 +236,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         />
       )}
 
-      {/* League & Profile Modal se loggato ma senza lega o profilo obbligatorio */}
+      {/* League & Profile Modal */}
       {session && (!leagueId || needsProfile) && (
         <LeagueModal
           userId={session.id}
@@ -222,12 +245,13 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             localStorage.setItem('active_league_id', lid);
             localStorage.setItem('alci_user_role', role);
             setLeagueId(lid);
+            setUserRole(role);
             setNeedsProfile(false);
           }}
         />
       )}
 
-      {/* Bottom Navigation Bar */}
+      {/* Bottom Navigation Bar: FISSA E PULITA CON I 5 TAB UGUALI PER TUTTI */}
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-800/80 bg-[#121721]/95 backdrop-blur-md py-2">
         <div className="mx-auto flex max-w-lg items-center justify-around px-2">
           <Link
@@ -267,13 +291,13 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             Players
           </Link>
           <Link
-            to="/admin"
+            to="/profile"
             className={`flex flex-col items-center gap-1 text-[11px] font-medium tracking-wide uppercase transition ${
-              currentPath === '/admin' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+              currentPath === '/profile' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <span className="text-lg">⚙️</span>
-            Admin
+            <span className="text-lg">👤</span>
+            Profilo
           </Link>
         </div>
       </nav>
