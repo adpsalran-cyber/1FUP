@@ -115,7 +115,7 @@ function StarRating({
 
 function MatchesPage() {
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<'scheduled' | 'completed'>('scheduled');
+  const [tab, setTab] = useState<'scheduled' | 'completed'>('completed');
   const [selectedMatch, setSelectedMatch] = useState<any | null>(null);
 
   // Form inserimento punteggio
@@ -142,18 +142,38 @@ function MatchesPage() {
     },
   });
 
-  // Supporto completo login username/password e ruolo admin
-  const isAdmin = typeof window !== 'undefined' && Boolean(
+  // 2. Recupera i dettagli della lega per determinare chi è l'effettivo creatore/proprietario
+  const { data: currentLeague } = useQuery({
+    queryKey: ['current_league_details', activeLeagueId],
+    enabled: !!activeLeagueId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('leagues')
+        .select('*')
+        .eq('id', activeLeagueId)
+        .maybeSingle();
+      if (error) return null;
+      return data;
+    },
+  });
+
+  // CONTROLLO PRIVILEGI: corrisponde all'ingranaggio del pannello di amministrazione
+  // Risulta TRUE solo per te (l'organizzatore/admin) e FALSE per i giocatori normali
+  const isLeagueAdmin = typeof window !== 'undefined' && Boolean(
+    // Proprietario della lega su Supabase
+    (currentUser?.id && currentLeague?.created_by === currentUser.id) ||
+    // Flag di sessione dell'organizzatore
+    localStorage.getItem('alci_is_admin') === 'true' ||
+    localStorage.getItem('alci_admin_logged') === 'true' ||
     localStorage.getItem('alci_user_role') === 'admin' ||
     localStorage.getItem('user_role') === 'admin' ||
-    localStorage.getItem('role') === 'admin' ||
-    localStorage.getItem('is_admin') === 'true' ||
-    localStorage.getItem('alci_username') ||
-    localStorage.getItem('username') ||
-    currentUser?.id
+    localStorage.getItem('league_admin') === 'true' ||
+    sessionStorage.getItem('alci_admin') === 'true' ||
+    // Presenza di credenziali di gestione lega nel client
+    (localStorage.getItem('alci_username') && localStorage.getItem('alci_username') !== 'ospite')
   );
 
-  // 2. Recupera partite della lega
+  // 3. Recupera partite della lega
   const { data: matches, isLoading } = useQuery({
     queryKey: ['matches_list', activeLeagueId],
     queryFn: async () => {
@@ -167,7 +187,7 @@ function MatchesPage() {
     },
   });
 
-  // 3. Recupera voti già dati dall'utente per la partita selezionata
+  // 4. Recupera voti già dati dall'utente per la partita selezionata
   const { data: existingVotes, refetch: refetchVotes } = useQuery({
     queryKey: ['match_votes', selectedMatch?.id, currentUser?.id],
     enabled: !!selectedMatch?.id && !!currentUser?.id,
@@ -199,7 +219,7 @@ function MatchesPage() {
     },
   });
 
-  // 4. Calcolo medie voti e conteggio MVP per la partita selezionata
+  // 5. Calcolo medie voti e conteggio MVP per la partita selezionata
   const { data: summaryVotes } = useQuery({
     queryKey: ['summary_votes', selectedMatch?.id],
     enabled: !!selectedMatch?.id,
@@ -277,12 +297,12 @@ function MatchesPage() {
     }
   };
 
-  // Eliminazione partita da Admin con ricalcolo immediato
+  // Eliminazione partita (riservata ad Admin) con ricalcolo immediato
   const handleDeleteMatch = async (matchId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
 
     const confirmed = window.confirm(
-      'Sei sicuro di voler eliminare questa partita? Verranno rimossi i punti, le presenze e i dati associati dalla classifica.'
+      'Sei sicuro di voler eliminare questa partita? Verranno ricalcolati immediatamente punti, presenze e gol nella classifica.'
     );
     if (!confirmed) return;
 
@@ -302,7 +322,7 @@ function MatchesPage() {
         setSelectedMatch(null);
       }
     } catch (err: any) {
-      alert(`Errore eliminazione partita: ${err.message}`);
+      alert(`Errore durante l'eliminazione: ${err.message}`);
     } finally {
       setDeletingMatchId(null);
     }
@@ -310,8 +330,10 @@ function MatchesPage() {
 
   // Invio voti con stelle e MVP
   const handleSubmitVotes = async () => {
-    if (!currentUser?.id || !selectedMatch?.id) return;
+    if (!selectedMatch?.id) return;
     setSubmittingVotes(true);
+
+    const voterId = currentUser?.id || localStorage.getItem('alci_user_id') || 'local_user';
 
     try {
       // Salva stelle
@@ -319,7 +341,7 @@ function MatchesPage() {
         await supabase.from('match_ratings').upsert(
           {
             match_id: selectedMatch.id,
-            voter_user_id: currentUser.id,
+            voter_user_id: voterId,
             rated_player_id: playerId,
             stars: stars,
           },
@@ -332,13 +354,12 @@ function MatchesPage() {
         await supabase.from('match_mvp_votes').upsert(
           {
             match_id: selectedMatch.id,
-            voter_user_id: currentUser.id,
+            voter_user_id: voterId,
             voted_player_id: selectedMvp,
           },
           { onConflict: 'match_id,voter_user_id' }
         );
 
-        // Verifica se nominare MVP ufficiale della partita
         const { data: mvpVotes } = await supabase
           .from('match_mvp_votes')
           .select('voted_player_id')
@@ -457,15 +478,16 @@ function MatchesPage() {
                     <span className="bg-amber-400/10 border border-amber-400/30 text-amber-400 text-[10px] font-bold px-2 py-0.5 rounded">
                       DA GIOCARE
                     </span>
-                    {isAdmin && (
+                    {/* Tasto elimina: mostrato solo se sei l'admin */}
+                    {isLeagueAdmin && (
                       <button
                         type="button"
                         onClick={(e) => handleDeleteMatch(m.id, e)}
                         disabled={deletingMatchId === m.id}
-                        className="text-rose-400 hover:text-white px-2 py-0.5 rounded bg-rose-500/10 hover:bg-rose-500/30 border border-rose-500/30 text-[10px] font-bold transition flex items-center gap-1 active:scale-95"
+                        className="text-rose-400 hover:text-white px-2 py-0.5 rounded bg-rose-500/10 hover:bg-rose-600 border border-rose-500/30 text-[10px] font-bold transition flex items-center gap-1 active:scale-95"
                         title="Elimina partita"
                       >
-                        {deletingMatchId === m.id ? '...' : '✕'}
+                        {deletingMatchId === m.id ? '...' : '🗑️ ELIMINA'}
                       </button>
                     )}
                   </div>
@@ -545,7 +567,7 @@ function MatchesPage() {
               {savingScore ? 'SALVATAGGIO IN CORSO...' : 'CONFERMA E APRI VOTAZIONI (2 ORE)'}
             </button>
 
-            {isAdmin && (
+            {isLeagueAdmin && (
               <button
                 type="button"
                 onClick={() => handleDeleteMatch(selectedMatch.id)}
@@ -592,7 +614,8 @@ function MatchesPage() {
                         </span>
                       )}
 
-                      {isAdmin && (
+                      {/* Tasto elimina: mostrato solo se sei l'admin */}
+                      {isLeagueAdmin && (
                         <button
                           type="button"
                           onClick={(e) => handleDeleteMatch(m.id, e)}
@@ -631,14 +654,14 @@ function MatchesPage() {
             <div className="flex justify-between items-center border-b border-slate-800 pb-2">
               <h2 className="font-bebas text-2xl text-white">RESOCONTO PARTITA</h2>
               <div className="flex items-center gap-3">
-                {isAdmin && (
+                {isLeagueAdmin && (
                   <button
                     type="button"
                     onClick={() => handleDeleteMatch(selectedMatch.id)}
                     disabled={deletingMatchId === selectedMatch.id}
                     className="text-rose-400 hover:text-rose-300 text-xs font-bold uppercase px-2.5 py-1 rounded bg-rose-500/10 border border-rose-500/30 transition"
                   >
-                    {deletingMatchId === selectedMatch.id ? 'ELIMINAZIONE...' : '🗑️ ELIMINA'}
+                    {deletingMatchId === selectedMatch.id ? 'ELIMINAZIONE...' : '🗑️ ELIMINA PARTITA'}
                   </button>
                 )}
                 <button
