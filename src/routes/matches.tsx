@@ -133,7 +133,7 @@ function MatchesPage() {
     ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
     : null;
 
-  // 1. Recupera l'utente corrente
+  // 1. Recupera l'utente corrente da Supabase Auth
   const { data: currentUser } = useQuery({
     queryKey: ['current_user'],
     queryFn: async () => {
@@ -142,8 +142,16 @@ function MatchesPage() {
     },
   });
 
-  // Essendo la tua lega, qualsiasi utente autenticato nella sessione ha i privilegi di amministrazione
-  const isAdmin = Boolean(currentUser?.id);
+  // Supporto completo login username/password e ruolo admin
+  const isAdmin = typeof window !== 'undefined' && Boolean(
+    localStorage.getItem('alci_user_role') === 'admin' ||
+    localStorage.getItem('user_role') === 'admin' ||
+    localStorage.getItem('role') === 'admin' ||
+    localStorage.getItem('is_admin') === 'true' ||
+    localStorage.getItem('alci_username') ||
+    localStorage.getItem('username') ||
+    currentUser?.id
+  );
 
   // 2. Recupera partite della lega
   const { data: matches, isLoading } = useQuery({
@@ -454,7 +462,7 @@ function MatchesPage() {
                         type="button"
                         onClick={(e) => handleDeleteMatch(m.id, e)}
                         disabled={deletingMatchId === m.id}
-                        className="text-rose-400 hover:text-rose-300 p-1 rounded bg-rose-500/10 border border-rose-500/20 text-[10px] font-bold transition"
+                        className="text-rose-400 hover:text-white px-2 py-0.5 rounded bg-rose-500/10 hover:bg-rose-500/30 border border-rose-500/30 text-[10px] font-bold transition flex items-center gap-1 active:scale-95"
                         title="Elimina partita"
                       >
                         {deletingMatchId === m.id ? '...' : '✕'}
@@ -589,10 +597,10 @@ function MatchesPage() {
                           type="button"
                           onClick={(e) => handleDeleteMatch(m.id, e)}
                           disabled={deletingMatchId === m.id}
-                          className="text-rose-400 hover:text-rose-300 px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 text-[10px] font-bold transition hover:bg-rose-500/20"
+                          className="text-rose-400 hover:text-white px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/30 border border-rose-500/30 text-[10px] font-bold transition flex items-center gap-1 active:scale-95"
                           title="Elimina partita e aggiorna classifica"
                         >
-                          {deletingMatchId === m.id ? '...' : 'ELIMINA'}
+                          {deletingMatchId === m.id ? '...' : '🗑️ ELIMINA'}
                         </button>
                       )}
                     </div>
