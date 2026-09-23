@@ -15,7 +15,7 @@ export function getConditionBadge(formVal: any) {
 
   if (val === 'infortunato' || val === 'injured' || val === 'croce') {
     return (
-      <div className="flex items-center gap-1 bg-[#2a151b] border border-red-500/50 px-2 py-0.5 rounded-lg text-red-400">
+      <div className="flex items-center gap-1 bg-[#2a1318] border border-red-500/40 px-2 py-0.5 rounded-lg text-red-400">
         <span className="text-xs font-bold leading-none">✚</span>
         <span className="text-[10px] font-bold">INF</span>
       </div>
@@ -26,7 +26,7 @@ export function getConditionBadge(formVal: any) {
 
   if (val === 'in_forma' || (!isNaN(num) && num > 0)) {
     return (
-      <div className="flex items-center gap-1 bg-[#102419] border border-emerald-500/50 px-2 py-0.5 rounded-lg text-emerald-400">
+      <div className="flex items-center gap-1 bg-[#102419] border border-emerald-500/40 px-2 py-0.5 rounded-lg text-emerald-400">
         <span className="text-sm font-bold leading-none">↑</span>
         <span className="text-[10px] font-bold">TOP</span>
       </div>
@@ -35,7 +35,7 @@ export function getConditionBadge(formVal: any) {
 
   if (val === 'non_in_forma' || (!isNaN(num) && num < 0)) {
     return (
-      <div className="flex items-center gap-1 bg-[#2b1619] border border-rose-500/50 px-2 py-0.5 rounded-lg text-rose-400">
+      <div className="flex items-center gap-1 bg-[#2b151a] border border-rose-500/40 px-2 py-0.5 rounded-lg text-rose-400">
         <span className="text-sm font-bold leading-none">↓</span>
         <span className="text-[10px] font-bold">DOWN</span>
       </div>
@@ -43,14 +43,14 @@ export function getConditionBadge(formVal: any) {
   }
 
   return (
-    <div className="flex items-center gap-1 bg-[#251d10] border border-amber-500/50 px-2 py-0.5 rounded-lg text-amber-400">
+    <div className="flex items-center gap-1 bg-[#281c10] border border-amber-500/40 px-2 py-0.5 rounded-lg text-amber-400">
       <span className="text-sm font-bold leading-none">→</span>
       <span className="text-[10px] font-bold">OK</span>
     </div>
   );
 }
 
-// Componente Card Giocatore Condiviso
+// Card Longilinea proporzionata identica allo screenshot
 export function PlayerCard({ player }: { player: any }) {
   const attrs = player.attributes || {};
   const vel = attrs.VEL ?? attrs.vel ?? 65;
@@ -64,8 +64,8 @@ export function PlayerCard({ player }: { player: any }) {
   const gkText = player.gk_efficiency || 'Media';
 
   return (
-    <div className="w-full max-w-[340px] mx-auto bg-[#131926] border border-[#1e2738] rounded-[28px] p-6 shadow-2xl space-y-4">
-      {/* Top: OVR + Badge Ruolo / FORMA */}
+    <div className="w-full rounded-[28px] bg-[#141a27] border border-[#20293d] p-6 shadow-2xl flex flex-col justify-between min-h-[460px] transition hover:border-slate-600">
+      {/* Top: OVR + Badge Ruolo a sinistra, FORMA a destra */}
       <div className="flex justify-between items-start">
         <div>
           <span className="font-bebas text-6xl text-slate-100 leading-none block">
@@ -77,66 +77,68 @@ export function PlayerCard({ player }: { player: any }) {
         </div>
 
         <div className="text-right flex flex-col items-end">
-          <span className="text-[9px] uppercase font-bold text-slate-400 tracking-wider block mb-1">
+          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mb-1">
             FORMA
           </span>
           {getConditionBadge(player.form ?? player.condition)}
         </div>
       </div>
 
-      {/* Nome Giocatore */}
-      <div className="text-center py-1">
-        <h2 className="font-bebas text-3xl text-slate-100 tracking-wider uppercase truncate">
+      {/* Centro: Nome Giocatore Spaziato */}
+      <div className="text-center py-4 my-auto">
+        <h2 className="font-bebas text-4xl text-slate-100 tracking-wider uppercase truncate">
           {player.name}
         </h2>
       </div>
 
-      {/* Griglia Statistiche */}
-      <div className="grid grid-cols-2 gap-x-8 gap-y-2.5 px-2 text-xs">
-        <div className="space-y-2.5">
+      {/* Griglia Attributi a 2 Colonne */}
+      <div className="grid grid-cols-2 gap-x-10 gap-y-3 px-3 text-xs mb-3">
+        {/* Colonna Sinistra */}
+        <div className="space-y-3">
           <div className="flex justify-between items-center">
-            <span className="text-slate-400 font-bold text-[11px]">VEL</span>
-            <span className="font-mono text-slate-100 font-bold text-sm">{vel}</span>
+            <span className="text-slate-400 font-bold text-xs tracking-wider">VEL</span>
+            <span className="font-mono text-slate-100 font-bold text-base">{vel}</span>
           </div>
           <div className="flex justify-between items-center">
-            <span className="text-slate-400 font-bold text-[11px]">TIR</span>
-            <span className="font-mono text-slate-100 font-bold text-sm">{tir}</span>
+            <span className="text-slate-400 font-bold text-xs tracking-wider">TIR</span>
+            <span className="font-mono text-slate-100 font-bold text-base">{tir}</span>
           </div>
           <div className="flex justify-between items-center">
-            <span className="text-slate-400 font-bold text-[11px]">PAS</span>
-            <span className="font-mono text-slate-100 font-bold text-sm">{pas}</span>
+            <span className="text-slate-400 font-bold text-xs tracking-wider">PAS</span>
+            <span className="font-mono text-slate-100 font-bold text-base">{pas}</span>
           </div>
         </div>
 
-        <div className="space-y-2.5">
+        {/* Colonna Destra */}
+        <div className="space-y-3">
           <div className="flex justify-between items-center">
-            <span className="text-slate-400 font-bold text-[11px]">DRI</span>
-            <span className="font-mono text-slate-100 font-bold text-sm">{dri}</span>
+            <span className="text-slate-400 font-bold text-xs tracking-wider">DRI</span>
+            <span className="font-mono text-slate-100 font-bold text-base">{dri}</span>
           </div>
           <div className="flex justify-between items-center">
-            <span className="text-slate-400 font-bold text-[11px]">DIF</span>
-            <span className="font-mono text-slate-100 font-bold text-sm">{dif}</span>
+            <span className="text-slate-400 font-bold text-xs tracking-wider">DIF</span>
+            <span className="font-mono text-slate-100 font-bold text-base">{dif}</span>
           </div>
           <div className="flex justify-between items-center">
-            <span className="text-slate-400 font-bold text-[11px]">FIS</span>
-            <span className="font-mono text-slate-100 font-bold text-sm">{fis}</span>
+            <span className="text-slate-400 font-bold text-xs tracking-wider">FIS</span>
+            <span className="font-mono text-slate-100 font-bold text-base">{fis}</span>
           </div>
         </div>
       </div>
 
-      {/* Gioco di squadra ed Efficacia portiere */}
-      <div className="border-t border-[#1e2738] pt-3.5 space-y-2 text-xs">
+      {/* Footer Carta: Gioco di squadra ed Efficacia portiere */}
+      <div className="border-t border-[#20293d] pt-4 space-y-2 text-xs">
         <div className="flex justify-between items-center">
-          <span className="text-slate-400">Gioco di squadra:</span>
+          <span className="text-slate-400 text-xs">Gioco di squadra:</span>
           <span className="flex items-center gap-1.5 font-medium text-slate-200">
-            <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" />
             {teamworkText}
           </span>
         </div>
         <div className="flex justify-between items-center">
-          <span className="text-slate-400">Efficacia portiere:</span>
+          <span className="text-slate-400 text-xs">Efficacia portiere:</span>
           <span className="flex items-center gap-1.5 font-medium text-slate-200">
-            <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" />
             {gkText}
           </span>
         </div>
@@ -164,7 +166,8 @@ function PlayersPage() {
   });
 
   return (
-    <div className="space-y-4 pb-20 max-w-md mx-auto">
+    <div className="space-y-5 pb-20 max-w-sm mx-auto px-1">
+      {/* Header Schermata */}
       <div className="flex justify-between items-start pt-1">
         <div>
           <h1 className="font-bebas text-4xl text-slate-100 tracking-wider">PLAYERS</h1>
@@ -176,7 +179,7 @@ function PlayersPage() {
         <button
           type="button"
           onClick={() => refetch()}
-          className="bg-[#151c28] border border-slate-700/80 hover:border-amber-400 text-amber-400 px-3.5 py-1.5 rounded-xl flex flex-col items-center leading-tight shadow transition"
+          className="bg-[#141a27] border border-slate-700 hover:border-amber-400 text-amber-400 px-3.5 py-1.5 rounded-xl flex flex-col items-center leading-tight shadow transition"
         >
           <span className="font-bebas text-xs tracking-wider">AGGIORNA</span>
           <span className="font-mono text-[10px] text-slate-400">({players?.length || 0})</span>
@@ -189,7 +192,8 @@ function PlayersPage() {
         </div>
       )}
 
-      <div className="space-y-4">
+      {/* Lista Carte Giocatore Allungate */}
+      <div className="space-y-5">
         {players?.map((player: any) => (
           <PlayerCard key={player.id} player={player} />
         ))}
