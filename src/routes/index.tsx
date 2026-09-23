@@ -1,12 +1,9 @@
 import React, { useState } from 'react';
-import { createRoute, Link } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { Route as rootRoute } from './__root';
 import { supabase } from '../lib/actions';
 
-export const Route = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/',
+export const Route = createFileRoute('/')({
   component: HomePage,
 });
 
@@ -80,7 +77,6 @@ function HomePage() {
 
         if (error || !Array.isArray(data)) return [];
 
-        // Filtro flessibile su lega (se il sondaggio non ha lega o corrisponde)
         let list = data;
         if (activeLeagueId) {
           const matchLeague = data.filter((p: any) => p.league_id === activeLeagueId);
@@ -110,7 +106,7 @@ function HomePage() {
         <h1 className="font-bebas text-4xl text-white tracking-wider">HUB PRINCIPALE</h1>
       </div>
 
-      {/* 1. MASSIMA PRIORITÀ: VOTAZIONI MVP ATTIVE (2 ORE) */}
+      {/* 1. VOTAZIONI MVP ATTIVE */}
       {activeVotingMatch && (
         <div className="bg-gradient-to-r from-amber-500/20 via-[#151c28] to-amber-500/10 border border-amber-400/60 rounded-2xl p-5 shadow-2xl space-y-3">
           <div className="flex justify-between items-center">
@@ -141,7 +137,7 @@ function HomePage() {
         </div>
       )}
 
-      {/* 2. SECONDA PRIORITÀ: PARTITA IN PROGRAMMA (CONVOCAZIONI CONCLUSE) */}
+      {/* 2. PARTITA IN PROGRAMMA */}
       {upcomingMatch && (
         <div className="bg-[#131926] border border-amber-500/40 rounded-2xl p-5 shadow-xl space-y-3">
           <div className="flex justify-between items-center border-b border-slate-800 pb-2">
@@ -166,7 +162,7 @@ function HomePage() {
         </div>
       )}
 
-      {/* 3. SONDAGGI CONVOCAZIONI (IN CIMA SE NON C'È PARTITA, O SOTTO DI ESSE) */}
+      {/* 3. SONDAGGI CONVOCAZIONI */}
       {Array.isArray(activePolls) && activePolls.length > 0 && (
         <div className="bg-[#131926] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
           <div className="flex justify-between items-center border-b border-slate-800/80 pb-2">
