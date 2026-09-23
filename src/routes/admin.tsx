@@ -12,7 +12,7 @@ export const Route = createRoute({
 
 function AdminPage() {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'seasons' | 'polls' | 'players' | 'matchmaker' | 'danger'>('seasons');
+  const [activeTab, setActiveTab] = useState<'seasons' | 'polls' | 'players' | 'matchmaker' | 'danger'>('polls');
 
   const activeLeagueId = typeof window !== 'undefined'
     ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
@@ -22,9 +22,12 @@ function AdminPage() {
   const [newSeasonName, setNewSeasonName] = useState('');
   const [creatingSeason, setCreatingSeason] = useState(false);
 
-  // --- 2. SONDAGGIO CONVOCAZIONI ---
+  // --- 2. SONDAGGIO A 6 ORARI ---
   const [pollTitle, setPollTitle] = useState('');
   const [pollDate, setPollDate] = useState('');
+  const [timeSlots, setTimeSlots] = useState<string[]>([
+    '18:30', '19:30', '20:30', '21:00', '21:30', '22:00'
+  ]);
   const [creatingPoll, setCreatingPoll] = useState(false);
 
   // --- 3. CREAZIONE GIOCATORE / DUMMY ---
@@ -71,7 +74,7 @@ function AdminPage() {
       if (!activeLeagueId) return [];
       const { data } = await supabase
         .from('match_polls')
-        .select('*')
+        .select('*, poll_options(*)')
         .eq('league_id', activeLeagueId)
         .order('created_at', { ascending: false });
       return data || [];
@@ -111,27 +114,63 @@ function AdminPage() {
     }
   };
 
-  // --- AZIONI SONDAGGIO ---
+  // --- AZIONI SONDAGGIO 6 ORARI ---
+  const handleSlotChange = (index: number, val: string) => {
+    const updated = [...timeSlots];
+    updated[index] = val;
+    setTimeSlots(updated);
+  };
+
   const handleCreatePoll = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pollTitle.trim() || !activeLeagueId) return;
     setCreatingPoll(true);
     try {
-      const { error } = await supabase.from('match_polls').insert({
-        league_id: activeLeagueId,
-        title: pollTitle.trim(),
-        match_date: pollDate ? new Date(pollDate).toISOString() : new Date().toISOString(),
-        status: 'open',
-      });
-      if (error) throw error;
+      // 1. Crea il sondaggio
+      const fullTitle = pollDate ? `${pollTitle.trim()} (${pollDate})` : pollTitle.trim();
+      const { data: pollData, error: pollErr } = await supabase
+        .from('match_polls')
+        .insert({
+          league_id: activeLeagueId,
+          title: fullTitle,
+          status: 'open',
+        })
+        .select()
+        .single();
+
+      if (pollErr) throw pollErr;
+
+      // 2. Inserisci i 6 slot orari
+      const optionsToInsert = timeSlots
+        .filter((slot) => slot.trim() !== '')
+        .map((slot, idx) => ({
+          poll_id: pollData.id,
+          slot_time: slot.trim(),
+          slot_order: idx + 1,
+        }));
+
+      if (optionsToInsert.length > 0) {
+        const { error: optErr } = await supabase.from('poll_options').insert(optionsToInsert);
+        if (optErr) throw optErr;
+      }
+
       setPollTitle('');
       setPollDate('');
       refetchPolls();
-      alert('Sondaggio convocazioni aperto!');
+      alert('Sondaggio con i 6 orari creato con successo!');
     } catch (err: any) {
-      alert(`Errore sondaggio: ${err.message}`);
+      alert(`Errore creazione sondaggio: ${err.message}`);
     } finally {
       setCreatingPoll(false);
+    }
+  };
+
+  const handleClosePoll = async (pollId: string) => {
+    try {
+      await supabase.from('match_polls').update({ status: 'closed' }).eq('id', pollId);
+      refetchPolls();
+    } catch (err: any) {
+      alert(`Errore: ${err.message}`);
     }
   };
 
@@ -178,7 +217,7 @@ function AdminPage() {
     }
   };
 
-  // --- GENERATORE SQUADRE (MATCHMAKER) ---
+  // --- GENERATORE SQUADRE ---
   const togglePlayerSelect = (pId: string) => {
     setSelectedPlayerIds((prev) =>
       prev.includes(pId) ? prev.filter((id) => id !== pId) : [...prev, pId]
@@ -187,20 +226,18 @@ function AdminPage() {
 
   const handleGenerateTeams = async (simulateResult: boolean = false) => {
     if (selectedPlayerIds.length < 2) {
-      alert('Seleziona almeno 2 o 10 giocatori per formare le squadre!');
+      alert('Seleziona almeno 2 giocatori per formare le squadre!');
       return;
     }
 
     setGeneratingMatch(true);
     try {
       const convPlayers = (players || []).filter((p: any) => selectedPlayerIds.includes(p.id));
-      // Ordina per OVR decrescente
       convPlayers.sort((a: any, b: any) => (b.overall || 70) - (a.overall || 70));
 
       const team1: any[] = [];
       const team2: any[] = [];
 
-      // Distribuzione a serpente per bilanciare la forza complessiva
       convPlayers.forEach((p: any, idx: number) => {
         if (idx % 2 === 0) team1.push(p);
         else team2.push(p);
@@ -212,7 +249,6 @@ function AdminPage() {
       let deadline = null;
 
       if (simulateResult) {
-        // Simulazione punteggio casuale
         score1 = Math.floor(Math.random() * 6) + 2;
         score2 = Math.floor(Math.random() * 6) + 2;
         status = 'completed';
@@ -231,7 +267,6 @@ function AdminPage() {
 
       if (error) throw error;
 
-      // Se simulata, aggiorna subito le statistiche
       if (simulateResult) {
         const isDraw = score1 === score2;
         const t1Won = score1 > score2;
@@ -255,7 +290,7 @@ function AdminPage() {
         await updateStats(team2, t2Won, isDraw);
       }
 
-      alert(simulateResult ? `Partita simulata con successo! Punteggio: ${score1} - ${score2}` : 'Partita creata e messa IN PROGRAMMA!');
+      alert(simulateResult ? `Partita simulata! Risultato: ${score1} - ${score2}` : 'Partita creata e messa "IN PROGRAMMA"!');
       setSelectedPlayerIds([]);
       queryClient.invalidateQueries({ queryKey: ['matches_list'] });
       queryClient.invalidateQueries({ queryKey: ['standings_table'] });
@@ -266,7 +301,7 @@ function AdminPage() {
     }
   };
 
-  // --- RESET DATI ---
+  // --- RESET ---
   const handleResetMatchesAndStats = async () => {
     if (!confirm('ATTENZIONE: Azzerare tutte le partite e riportare a 0 le statistiche di tutti i giocatori?')) return;
     try {
@@ -281,7 +316,7 @@ function AdminPage() {
 
       queryClient.invalidateQueries({ queryKey: ['matches_list'] });
       queryClient.invalidateQueries({ queryKey: ['standings_table'] });
-      alert('Statistiche e partite azzerate con successo!');
+      alert('Statistiche e partite azzerate!');
     } catch (err: any) {
       alert(`Errore reset: ${err.message}`);
     }
@@ -299,16 +334,16 @@ function AdminPage() {
         </div>
       </div>
 
-      {/* Menu Tab Orizzontale a Scorrimento */}
+      {/* Tabs */}
       <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar text-xs font-bebas">
         <button
           type="button"
-          onClick={() => setActiveTab('seasons')}
+          onClick={() => setActiveTab('polls')}
           className={`px-3 py-2 rounded-xl whitespace-nowrap tracking-wider transition ${
-            activeTab === 'seasons' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-[#131926] text-slate-400 hover:text-white'
+            activeTab === 'polls' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-[#131926] text-slate-400 hover:text-white'
           }`}
         >
-          🏆 STAGIONI
+          🗳️ SONDAGGI
         </button>
         <button
           type="button"
@@ -321,21 +356,21 @@ function AdminPage() {
         </button>
         <button
           type="button"
-          onClick={() => setActiveTab('polls')}
-          className={`px-3 py-2 rounded-xl whitespace-nowrap tracking-wider transition ${
-            activeTab === 'polls' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-[#131926] text-slate-400 hover:text-white'
-          }`}
-        >
-          🗳️ SONDAGGI
-        </button>
-        <button
-          type="button"
           onClick={() => setActiveTab('players')}
           className={`px-3 py-2 rounded-xl whitespace-nowrap tracking-wider transition ${
             activeTab === 'players' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-[#131926] text-slate-400 hover:text-white'
           }`}
         >
           👥 GIOCATORI ({players?.length || 0})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('seasons')}
+          className={`px-3 py-2 rounded-xl whitespace-nowrap tracking-wider transition ${
+            activeTab === 'seasons' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-[#131926] text-slate-400 hover:text-white'
+          }`}
+        >
+          🏆 STAGIONI
         </button>
         <button
           type="button"
@@ -348,53 +383,105 @@ function AdminPage() {
         </button>
       </div>
 
-      {/* 1. SEZIONE STAGIONI */}
-      {activeTab === 'seasons' && (
-        <div className="bg-[#131926] border border-amber-400/30 rounded-2xl p-5 shadow-xl space-y-4">
-          <h2 className="font-bebas text-2xl text-white">GESTIONE STAGIONI</h2>
-          <form onSubmit={handleCreateSeason} className="space-y-2">
-            <label className="text-[11px] text-slate-400 font-bold uppercase block">
-              Nome Nuova Stagione
-            </label>
-            <div className="flex gap-2">
+      {/* 1. SEZIONE SONDAGGI CON 6 ORARI */}
+      {activeTab === 'polls' && (
+        <div className="bg-[#131926] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+          <div>
+            <h2 className="font-bebas text-2xl text-white">CREA SONDAGGIO PARTITA</h2>
+            <p className="text-xs text-slate-400">
+              Imposta il titolo e fino a 6 slot orari selezionabili dai giocatori.
+            </p>
+          </div>
+
+          <form onSubmit={handleCreatePoll} className="space-y-3">
+            <div>
+              <label className="text-[11px] text-slate-400 font-bold uppercase block mb-1">
+                Titolo Partita / Evento
+              </label>
               <input
                 type="text"
-                placeholder="Es. Stagione 2026/27"
-                value={newSeasonName}
-                onChange={(e) => setNewSeasonName(e.target.value)}
-                className="flex-1 bg-[#0b0e14] border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-400"
+                placeholder="Es. Calcettonata Infrasettimanale"
+                value={pollTitle}
+                onChange={(e) => setPollTitle(e.target.value)}
+                className="w-full bg-[#0b0e14] border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-400"
                 required
               />
-              <button
-                type="submit"
-                disabled={creatingSeason}
-                className="bg-amber-400 hover:bg-amber-300 text-slate-950 font-bebas text-sm px-4 py-2 rounded-xl font-bold transition"
-              >
-                {creatingSeason ? 'SALVO...' : 'CREA'}
-              </button>
             </div>
+
+            <div>
+              <label className="text-[11px] text-slate-400 font-bold uppercase block mb-1">
+                Giorno Proposto
+              </label>
+              <input
+                type="date"
+                value={pollDate}
+                onChange={(e) => setPollDate(e.target.value)}
+                className="w-full bg-[#0b0e14] border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            {/* 6 Slot Orari Personalizzabili */}
+            <div className="space-y-1.5 pt-1">
+              <label className="text-[11px] text-amber-400 font-bold uppercase block">
+                6 Orari Selezionabili (Personalizza)
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {timeSlots.map((slot, index) => (
+                  <div key={index} className="flex items-center gap-1">
+                    <span className="text-[10px] text-slate-500 font-mono w-3">{index + 1}.</span>
+                    <input
+                      type="text"
+                      value={slot}
+                      onChange={(e) => handleSlotChange(index, e.target.value)}
+                      placeholder="es. 20:30"
+                      className="w-full bg-[#0b0e14] border border-slate-700 text-white rounded-lg px-2 py-1.5 text-xs text-center font-mono focus:border-amber-400 outline-none"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={creatingPoll}
+              className="w-full py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bebas text-sm rounded-xl font-bold transition shadow mt-2"
+            >
+              {creatingPoll ? 'APERTURA...' : 'APRI SONDAGGIO (6 ORARI)'}
+            </button>
           </form>
 
+          {/* Elenco Sondaggi */}
           <div className="pt-2 border-t border-slate-800 space-y-2">
-            <span className="text-[10px] font-bold text-slate-400 uppercase block">Stagioni Esistenti</span>
-            {seasons?.map((s: any) => (
-              <div key={s.id} className="flex justify-between items-center bg-[#0b0e14] p-2.5 rounded-xl border border-slate-800 text-xs">
-                <span className="font-bold text-white">{s.name}</span>
-                {s.is_active ? (
-                  <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
-                    ATTIVA
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => handleSetActiveSeason(s.id)}
-                    className="text-amber-400 hover:underline font-bold text-xs"
-                  >
-                    Attiva
-                  </button>
-                )}
-              </div>
-            ))}
+            <span className="text-[10px] font-bold text-slate-400 uppercase block">Sondaggi Creati</span>
+            {polls && polls.length > 0 ? (
+              polls.map((p: any) => (
+                <div key={p.id} className="flex justify-between items-center bg-[#0b0e14] p-3 rounded-xl border border-slate-800 text-xs">
+                  <div>
+                    <span className="font-bold text-white block">{p.title}</span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {p.poll_options?.map((opt: any) => (
+                        <span key={opt.id} className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] text-slate-300 font-mono">
+                          {opt.slot_time}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  {p.status === 'open' ? (
+                    <button
+                      type="button"
+                      onClick={() => handleClosePoll(p.id)}
+                      className="px-2 py-1 bg-rose-950/40 text-rose-400 border border-rose-900/40 rounded text-[10px] font-bold"
+                    >
+                      Chiudi
+                    </button>
+                  ) : (
+                    <span className="text-slate-500 text-[10px]">Chiuso</span>
+                  )}
+                </div>
+              ))
+            ) : (
+              <p className="text-xs text-slate-500 italic">Nessun sondaggio attivo.</p>
+            )}
           </div>
         </div>
       )}
@@ -405,7 +492,7 @@ function AdminPage() {
           <div>
             <h2 className="font-bebas text-2xl text-white">BILANCIATORE & SIMULATORE SQUADRE</h2>
             <p className="text-xs text-slate-400">
-              Seleziona i giocatori presenti per generare automaticamente due squadre equilibrate in base all'Overall.
+              Seleziona i giocatori presenti per generare due squadre bilanciate per Overall.
             </p>
           </div>
 
@@ -461,62 +548,7 @@ function AdminPage() {
         </div>
       )}
 
-      {/* 3. SEZIONE SONDAGGI */}
-      {activeTab === 'polls' && (
-        <div className="bg-[#131926] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
-          <h2 className="font-bebas text-2xl text-white">CREA SONDAGGIO CONVOCAZIONI</h2>
-          <form onSubmit={handleCreatePoll} className="space-y-3">
-            <div>
-              <label className="text-[11px] text-slate-400 font-bold uppercase block mb-1">
-                Titolo Partita / Evento
-              </label>
-              <input
-                type="text"
-                placeholder="Es. Calcettonata del Giovedì"
-                value={pollTitle}
-                onChange={(e) => setPollTitle(e.target.value)}
-                className="w-full bg-[#0b0e14] border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-400"
-                required
-              />
-            </div>
-            <div>
-              <label className="text-[11px] text-slate-400 font-bold uppercase block mb-1">
-                Data e Ora
-              </label>
-              <input
-                type="datetime-local"
-                value={pollDate}
-                onChange={(e) => setPollDate(e.target.value)}
-                className="w-full bg-[#0b0e14] border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-400"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={creatingPoll}
-              className="w-full py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bebas text-sm rounded-xl font-bold transition shadow"
-            >
-              {creatingPoll ? 'APERTURA...' : 'APRI SONDAGGIO'}
-            </button>
-          </form>
-
-          <div className="pt-2 border-t border-slate-800 space-y-2">
-            <span className="text-[10px] font-bold text-slate-400 uppercase block">Sondaggi Creati</span>
-            {polls?.map((p: any) => (
-              <div key={p.id} className="flex justify-between items-center bg-[#0b0e14] p-2.5 rounded-xl border border-slate-800 text-xs">
-                <div>
-                  <span className="font-bold text-white block">{p.title}</span>
-                  <span className="text-[10px] text-slate-400">{new Date(p.created_at).toLocaleDateString()}</span>
-                </div>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${p.status === 'open' ? 'text-emerald-400 bg-emerald-950/60' : 'text-slate-400 bg-slate-800'}`}>
-                  {p.status === 'open' ? 'APERTO' : 'CHIUSO'}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* 4. SEZIONE GESTIONE GIOCATORI & FITTIZI */}
+      {/* 3. SEZIONE GESTIONE GIOCATORI & BOT */}
       {activeTab === 'players' && (
         <div className="space-y-4">
           <div className="bg-[#131926] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
@@ -555,7 +587,6 @@ function AdminPage() {
                 />
               </div>
 
-              {/* Toggle Fittizio / Bot */}
               <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer pt-1">
                 <input
                   type="checkbox"
@@ -563,7 +594,7 @@ function AdminPage() {
                   onChange={(e) => setIsDummy(e.target.checked)}
                   className="rounded border-slate-700 text-amber-400"
                 />
-                <span>Segna come <strong>Giocatore Fittizio / Bot 🤖</strong> (non voterà MVP)</span>
+                <span>Segna come <strong>Giocatore Fittizio / Bot 🤖</strong></span>
               </label>
 
               <button
@@ -576,7 +607,6 @@ function AdminPage() {
             </form>
           </div>
 
-          {/* Elenco e Cancellazione Giocatori */}
           <div className="bg-[#131926] border border-slate-800 rounded-2xl p-4 shadow-xl space-y-2">
             <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Rosa Attuale</span>
             <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
@@ -600,6 +630,57 @@ function AdminPage() {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 4. SEZIONE STAGIONI */}
+      {activeTab === 'seasons' && (
+        <div className="bg-[#131926] border border-amber-400/30 rounded-2xl p-5 shadow-xl space-y-4">
+          <h2 className="font-bebas text-2xl text-white">GESTIONE STAGIONI</h2>
+          <form onSubmit={handleCreateSeason} className="space-y-2">
+            <label className="text-[11px] text-slate-400 font-bold uppercase block">
+              Nome Nuova Stagione
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Es. Stagione 2026/27"
+                value={newSeasonName}
+                onChange={(e) => setNewSeasonName(e.target.value)}
+                className="flex-1 bg-[#0b0e14] border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-400"
+                required
+              />
+              <button
+                type="submit"
+                disabled={creatingSeason}
+                className="bg-amber-400 hover:bg-amber-300 text-slate-950 font-bebas text-sm px-4 py-2 rounded-xl font-bold transition"
+              >
+                {creatingSeason ? 'SALVO...' : 'CREA'}
+              </button>
+            </div>
+          </form>
+
+          <div className="pt-2 border-t border-slate-800 space-y-2">
+            <span className="text-[10px] font-bold text-slate-400 uppercase block">Stagioni Esistenti</span>
+            {seasons?.map((s: any) => (
+              <div key={s.id} className="flex justify-between items-center bg-[#0b0e14] p-2.5 rounded-xl border border-slate-800 text-xs">
+                <span className="font-bold text-white">{s.name}</span>
+                {s.is_active ? (
+                  <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
+                    ATTIVA
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleSetActiveSeason(s.id)}
+                    className="text-amber-400 hover:underline font-bold text-xs"
+                  >
+                    Attiva
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}
