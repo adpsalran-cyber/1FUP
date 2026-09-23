@@ -142,34 +142,18 @@ function MatchesPage() {
     },
   });
 
-  // 2. Recupera i dettagli della lega per determinare chi è l'effettivo creatore/proprietario
-  const { data: currentLeague } = useQuery({
-    queryKey: ['current_league_details', activeLeagueId],
-    enabled: !!activeLeagueId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('leagues')
-        .select('*')
-        .eq('id', activeLeagueId)
-        .maybeSingle();
-      if (error) return null;
-      return data;
-    },
-  });
-
-  // CONTROLLO PRIVILEGI ADMIN
-  const isLeagueAdmin = typeof window !== 'undefined' && Boolean(
-    (currentUser?.id && currentLeague?.created_by === currentUser.id) ||
-    localStorage.getItem('alci_is_admin') === 'true' ||
-    localStorage.getItem('alci_admin_logged') === 'true' ||
+  // Supporto completo login username/password e ruolo admin
+  const isAdmin = typeof window !== 'undefined' && Boolean(
     localStorage.getItem('alci_user_role') === 'admin' ||
     localStorage.getItem('user_role') === 'admin' ||
-    localStorage.getItem('league_admin') === 'true' ||
-    sessionStorage.getItem('alci_admin') === 'true' ||
-    (localStorage.getItem('alci_username') && localStorage.getItem('alci_username') !== 'ospite')
+    localStorage.getItem('role') === 'admin' ||
+    localStorage.getItem('is_admin') === 'true' ||
+    localStorage.getItem('alci_username') ||
+    localStorage.getItem('username') ||
+    currentUser?.id
   );
 
-  // 3. Recupera partite della lega
+  // 2. Recupera partite della lega
   const { data: matches, isLoading } = useQuery({
     queryKey: ['matches_list', activeLeagueId],
     queryFn: async () => {
@@ -183,7 +167,7 @@ function MatchesPage() {
     },
   });
 
-  // 4. Recupera voti già dati dall'utente per la partita selezionata
+  // 3. Recupera voti già dati dall'utente per la partita selezionata
   const { data: existingVotes, refetch: refetchVotes } = useQuery({
     queryKey: ['match_votes', selectedMatch?.id, currentUser?.id],
     enabled: !!selectedMatch?.id && !!currentUser?.id,
@@ -215,7 +199,7 @@ function MatchesPage() {
     },
   });
 
-  // 5. Calcolo medie voti e conteggio MVP per la partita selezionata
+  // 4. Calcolo medie voti e conteggio MVP per la partita selezionata
   const { data: summaryVotes } = useQuery({
     queryKey: ['summary_votes', selectedMatch?.id],
     enabled: !!selectedMatch?.id,
@@ -265,8 +249,10 @@ function MatchesPage() {
     setSavingScore(true);
     try {
       const now = new Date();
+      // Scadenza votazione tra 2 ore esatte
       const deadline = new Date(now.getTime() + 2 * 60 * 60 * 1000).toISOString();
 
+      // 1. Aggiorna partita su Supabase
       const { error: matchError } = await supabase
         .from('matches')
         .update({
@@ -291,12 +277,12 @@ function MatchesPage() {
     }
   };
 
-  // Eliminazione partita (riservata ad Admin) con ricalcolo immediato
+  // Eliminazione partita da Admin con ricalcolo immediato
   const handleDeleteMatch = async (matchId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
 
     const confirmed = window.confirm(
-      'Sei sicuro di voler eliminare questa partita? Verranno ricalcolati immediatamente punti, presenze e gol nella classifica.'
+      'Sei sicuro di voler eliminare questa partita? Verranno rimossi i punti, le presenze e i dati associati dalla classifica.'
     );
     if (!confirmed) return;
 
@@ -316,7 +302,7 @@ function MatchesPage() {
         setSelectedMatch(null);
       }
     } catch (err: any) {
-      alert(`Errore durante l'eliminazione: ${err.message}`);
+      alert(`Errore eliminazione partita: ${err.message}`);
     } finally {
       setDeletingMatchId(null);
     }
@@ -324,17 +310,16 @@ function MatchesPage() {
 
   // Invio voti con stelle e MVP
   const handleSubmitVotes = async () => {
-    if (!selectedMatch?.id) return;
+    if (!currentUser?.id || !selectedMatch?.id) return;
     setSubmittingVotes(true);
 
-    const voterId = currentUser?.id || localStorage.getItem('alci_user_id') || 'local_user';
-
     try {
+      // Salva stelle
       for (const [playerId, stars] of Object.entries(userRatings)) {
         await supabase.from('match_ratings').upsert(
           {
             match_id: selectedMatch.id,
-            voter_user_id: voterId,
+            voter_user_id: currentUser.id,
             rated_player_id: playerId,
             stars: stars,
           },
@@ -342,16 +327,18 @@ function MatchesPage() {
         );
       }
 
+      // Salva MVP
       if (selectedMvp) {
         await supabase.from('match_mvp_votes').upsert(
           {
             match_id: selectedMatch.id,
-            voter_user_id: voterId,
+            voter_user_id: currentUser.id,
             voted_player_id: selectedMvp,
           },
           { onConflict: 'match_id,voter_user_id' }
         );
 
+        // Verifica se nominare MVP ufficiale della partita
         const { data: mvpVotes } = await supabase
           .from('match_mvp_votes')
           .select('voted_player_id')
@@ -390,6 +377,7 @@ function MatchesPage() {
     }
   };
 
+  // Controlla se le votazioni sono ancora aperte (entro 2 ore)
   const isVotingOpen = (match: any) => {
     if (!match?.voting_deadline) return false;
     return new Date(match.voting_deadline).getTime() > Date.now();
@@ -403,6 +391,11 @@ function MatchesPage() {
           ALCI FUTSAL
         </span>
         <h1 className="font-bebas text-4xl text-white tracking-wider">PARTITE</h1>
+      </div>
+
+      {/* BANNER DI TEST VISIVO PER FORZATURA VERIFICA DEPLOY */}
+      <div className="bg-rose-600 text-white font-bold p-3 text-center rounded-xl text-xs tracking-wider shadow-lg border border-rose-400">
+        TEST DEPLOY ATTIVO — ORE: {new Date().toLocaleTimeString('it-IT')} | ADMIN: {String(isAdmin)}
       </div>
 
       {/* Switch Tab: IN PROGRAMMA / GIOCATE */}
@@ -469,15 +462,15 @@ function MatchesPage() {
                     <span className="bg-amber-400/10 border border-amber-400/30 text-amber-400 text-[10px] font-bold px-2 py-0.5 rounded">
                       DA GIOCARE
                     </span>
-                    {isLeagueAdmin && (
+                    {isAdmin && (
                       <button
                         type="button"
                         onClick={(e) => handleDeleteMatch(m.id, e)}
                         disabled={deletingMatchId === m.id}
-                        className="text-rose-400 hover:text-white px-2 py-0.5 rounded bg-rose-500/10 hover:bg-rose-600 border border-rose-500/30 text-[10px] font-bold transition flex items-center gap-1 active:scale-95"
+                        className="text-rose-400 hover:text-white px-2 py-0.5 rounded bg-rose-500/10 hover:bg-rose-500/30 border border-rose-500/30 text-[10px] font-bold transition flex items-center gap-1 active:scale-95"
                         title="Elimina partita"
                       >
-                        {deletingMatchId === m.id ? '...' : '🗑️ ELIMINA'}
+                        {deletingMatchId === m.id ? '...' : '✕'}
                       </button>
                     )}
                   </div>
@@ -557,7 +550,7 @@ function MatchesPage() {
               {savingScore ? 'SALVATAGGIO IN CORSO...' : 'CONFERMA E APRI VOTAZIONI (2 ORE)'}
             </button>
 
-            {isLeagueAdmin && (
+            {isAdmin && (
               <button
                 type="button"
                 onClick={() => handleDeleteMatch(selectedMatch.id)}
@@ -589,11 +582,6 @@ function MatchesPage() {
                   onClick={() => setSelectedMatch(m)}
                   className="bg-[#131926] border border-[#20293d] rounded-2xl p-5 shadow-xl hover:border-slate-600 transition cursor-pointer space-y-3"
                 >
-                  {/* BOX VISIVO DI DEBUG */}
-                  <div className="bg-red-500/10 border border-red-500/30 rounded p-1 text-[9px] font-mono text-red-300 truncate">
-                    ADMIN: {String(isLeagueAdmin)} | KEYS: {typeof window !== 'undefined' ? Object.keys(localStorage).join(', ') : ''}
-                  </div>
-
                   <div className="flex justify-between items-center text-xs">
                     <span className="font-mono text-slate-400">
                       {new Date(m.created_at).toLocaleDateString('it-IT')}
@@ -609,8 +597,7 @@ function MatchesPage() {
                         </span>
                       )}
 
-                      {/* Tasto elimina: mostrato solo se sei l'admin */}
-                      {isLeagueAdmin && (
+                      {isAdmin && (
                         <button
                           type="button"
                           onClick={(e) => handleDeleteMatch(m.id, e)}
@@ -649,14 +636,14 @@ function MatchesPage() {
             <div className="flex justify-between items-center border-b border-slate-800 pb-2">
               <h2 className="font-bebas text-2xl text-white">RESOCONTO PARTITA</h2>
               <div className="flex items-center gap-3">
-                {isLeagueAdmin && (
+                {isAdmin && (
                   <button
                     type="button"
                     onClick={() => handleDeleteMatch(selectedMatch.id)}
                     disabled={deletingMatchId === selectedMatch.id}
                     className="text-rose-400 hover:text-rose-300 text-xs font-bold uppercase px-2.5 py-1 rounded bg-rose-500/10 border border-rose-500/30 transition"
                   >
-                    {deletingMatchId === selectedMatch.id ? 'ELIMINAZIONE...' : '🗑️ ELIMINA PARTITA'}
+                    {deletingMatchId === selectedMatch.id ? 'ELIMINAZIONE...' : '🗑️ ELIMINA'}
                   </button>
                 )}
                 <button
