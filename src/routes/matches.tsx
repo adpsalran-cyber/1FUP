@@ -158,7 +158,7 @@ function MatchesPage() {
         if (!averages[r.rated_player_id]) {
           averages[r.rated_player_id] = { avg: 0, count: 0 };
         }
-        averages[r.rated_player_id].avg += Number(r.stars) * 2; // Da stelle a voto in decimi
+        averages[r.rated_player_id].avg += Number(r.stars) * 2;
         averages[r.rated_player_id].count += 1;
       });
 
@@ -191,12 +191,12 @@ function MatchesPage() {
       // Scadenza votazione tra 2 ore esatte
       const deadline = new Date(now.getTime() + 2 * 60 * 60 * 1000).toISOString();
 
-      // 1. Aggiorna partita
+      // 1. Aggiorna partita su Supabase
       const { error: matchError } = await supabase
         .from('matches')
         .update({
-          score_team1: scoreTeam1,
-          score_team2: scoreTeam2,
+          score_team1: Number(scoreTeam1),
+          score_team2: Number(scoreTeam2),
           status: 'completed',
           voting_deadline: deadline,
         })
@@ -204,44 +204,11 @@ function MatchesPage() {
 
       if (matchError) throw matchError;
 
-      // 2. Calcola esito per ciascuna squadra
-      const isDraw = scoreTeam1 === scoreTeam2;
-      const team1Won = scoreTeam1 > scoreTeam2;
-      const team2Won = scoreTeam2 > scoreTeam1;
-
-      const team1Players = match.team1_players || [];
-      const team2Players = match.team2_players || [];
-
-      const updatePlayerStats = async (players: any[], won: boolean, draw: boolean) => {
-        for (const p of players) {
-          if (!p.id) continue;
-          const { data: dbPlayer } = await supabase
-            .from('players')
-            .select('matches_played, wins, draws, losses')
-            .eq('id', p.id)
-            .maybeSingle();
-
-          if (dbPlayer) {
-            const mp = (dbPlayer.matches_played || 0) + 1;
-            const w = (dbPlayer.wins || 0) + (won ? 1 : 0);
-            const d = (dbPlayer.draws || 0) + (draw ? 1 : 0);
-            const l = (dbPlayer.losses || 0) + (!won && !draw ? 1 : 0);
-
-            await supabase
-              .from('players')
-              .update({ matches_played: mp, wins: w, draws: d, losses: l })
-              .eq('id', p.id);
-          }
-        }
-      };
-
-      await updatePlayerStats(team1Players, team1Won, isDraw);
-      await updatePlayerStats(team2Players, team2Won, isDraw);
-
       alert('Risultato salvato! Classifica aggiornata. Votazioni aperte per 2 ore.');
       queryClient.invalidateQueries({ queryKey: ['matches_list'] });
       queryClient.invalidateQueries({ queryKey: ['standings_table'] });
       setSelectedMatch(null);
+      setTab('completed');
     } catch (err: any) {
       alert(`Errore salvataggio risultato: ${err.message}`);
     } finally {
@@ -304,20 +271,6 @@ function MatchesPage() {
             .from('matches')
             .update({ mvp_player_id: topPlayerId })
             .eq('id', selectedMatch.id);
-
-          // Incrementa mvp_count del giocatore
-          const { data: pData } = await supabase
-            .from('players')
-            .select('mvp_count')
-            .eq('id', topPlayerId)
-            .maybeSingle();
-
-          if (pData) {
-            await supabase
-              .from('players')
-              .update({ mvp_count: (pData.mvp_count || 0) + 1 })
-              .eq('id', topPlayerId);
-          }
         }
       }
 
@@ -438,7 +391,7 @@ function MatchesPage() {
         </div>
       )}
 
-      {/* SCHERMATA DETTAGLIO: INSERISCI RISULTATO (Se in programma) */}
+      {/* SCHERMATA DETTAGLIO: INSERISCI RISULTATO */}
       {tab === 'scheduled' && selectedMatch && (
         <div className="bg-[#131926] border border-[#20293d] rounded-2xl p-5 shadow-2xl space-y-5">
           <div className="flex justify-between items-center border-b border-slate-800 pb-2">
@@ -451,7 +404,6 @@ function MatchesPage() {
             </button>
           </div>
 
-          {/* Form Inserimento Punteggio */}
           <div className="grid grid-cols-3 items-center gap-3 bg-[#0b0e14] border border-slate-800 p-4 rounded-xl text-center">
             <div>
               <span className="font-bold text-white text-xs block mb-1">Squadra 1</span>
@@ -539,7 +491,7 @@ function MatchesPage() {
         </div>
       )}
 
-      {/* RESOCONTO PARTITA GIOCATA: SQUADRE + VOTAZIONI STELLE & MVP */}
+      {/* RESOCONTO PARTITA GIOCATA */}
       {tab === 'completed' && selectedMatch && (
         <div className="space-y-6">
           <div className="bg-[#131926] border border-[#20293d] rounded-2xl p-5 shadow-2xl space-y-4">
@@ -553,7 +505,6 @@ function MatchesPage() {
               </button>
             </div>
 
-            {/* Punteggio */}
             <div className="flex justify-between items-center py-3 px-4 bg-[#0b0e14] rounded-xl border border-slate-800 text-center">
               <span className="flex-1 font-bold text-white text-sm">Squadra 1</span>
               <span className="font-bebas text-4xl text-amber-400 px-4">
@@ -562,7 +513,6 @@ function MatchesPage() {
               <span className="flex-1 font-bold text-white text-sm">Squadra 2</span>
             </div>
 
-            {/* Formazioni affiancate */}
             <div className="grid grid-cols-2 gap-4 text-xs">
               <div className="bg-[#0b0e14] p-3 rounded-xl border border-slate-800 space-y-1.5">
                 <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">
@@ -607,13 +557,12 @@ function MatchesPage() {
               )}
             </div>
 
-            {/* Tabella di Voto Allineata: Giocatore | Stelle | MVP */}
             <div className="space-y-3">
               {[
                 ...(selectedMatch.team1_players || []),
                 ...(selectedMatch.team2_players || []),
               ]
-                .filter((p: any) => !p.is_dummy && !p.is_bot) // Solo umani
+                .filter((p: any) => !p.is_dummy && !p.is_bot)
                 .map((player: any) => {
                   const ratingVal = userRatings[player.id] || 0;
                   const isMvpSelected = selectedMvp === player.id;
@@ -624,7 +573,6 @@ function MatchesPage() {
                       key={player.id}
                       className="flex items-center justify-between bg-[#0b0e14] border border-slate-800/80 p-3 rounded-xl"
                     >
-                      {/* Nome Giocatore */}
                       <div className="w-1/3 truncate">
                         <span className="font-bold text-white text-sm block truncate">
                           {player.name}
@@ -636,7 +584,6 @@ function MatchesPage() {
                         )}
                       </div>
 
-                      {/* Voto a Stelle (Mezze stelle incluse) */}
                       <div className="flex-1 flex justify-center">
                         <StarRating
                           value={ratingVal}
@@ -647,7 +594,6 @@ function MatchesPage() {
                         />
                       </div>
 
-                      {/* Bottone MVP */}
                       <div className="w-16 flex justify-end">
                         <button
                           type="button"
@@ -667,7 +613,6 @@ function MatchesPage() {
                 })}
             </div>
 
-            {/* Tasto Invia Voto se votazione aperta */}
             {isVotingOpen(selectedMatch) && (
               <button
                 type="button"
