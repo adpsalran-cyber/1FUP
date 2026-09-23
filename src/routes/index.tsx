@@ -118,13 +118,16 @@ function HomePage() {
       });
 
       const { teamA, teamB } = balanceTeams(participants);
+      const chosenTime = bestSlot || '21:00';
+      const playedAtTimestamp = `${activePoll.target_date}T${chosenTime.length === 5 ? chosenTime + ':00' : chosenTime}`;
 
       const { data: newMatch, error: matchErr } = await supabase
         .from('matches')
         .insert({
           league_id: activeLeagueId,
           match_date: activePoll.target_date,
-          match_time: bestSlot,
+          match_time: chosenTime,
+          played_at: playedAtTimestamp,
           status: 'scheduled',
           team_a_players: teamA,
           team_b_players: teamB,
@@ -358,7 +361,7 @@ function HomePage() {
             </div>
           </div>
 
-          {/* PULSANTE CREAZIONE MANUALE (Mostrato solo se l'auto-creazione era disattivata nell'admin) */}
+          {/* PULSANTE CREAZIONE MANUALE */}
           {isAdmin && !activePoll.auto_create_match && confirmedVotes.length >= 10 && (
             <div className="pt-2">
               <button
