@@ -17,43 +17,48 @@ function HomePage() {
     ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
     : null;
 
-  // 1. Partita con votazioni MVP attive (prioritaria in cima)
+  // 1. Partita con votazioni MVP attive
   const { data: activeVotingMatch } = useQuery({
     queryKey: ['active_voting_match', activeLeagueId],
     queryFn: async () => {
       if (!activeLeagueId) return null;
-      const now = new Date().toISOString();
-      const { data } = await supabase
-        .from('matches')
-        .select('*')
-        .eq('league_id', activeLeagueId)
-        .eq('status', 'completed')
-        .gt('voting_deadline', now)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      try {
+        const now = new Date().toISOString();
+        const { data } = await supabase
+          .from('matches')
+          .select('*')
+          .eq('league_id', activeLeagueId)
+          .eq('status', 'completed')
+          .gt('voting_deadline', now)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      return data || null;
+        return data || null;
+      } catch {
+        return null;
+      }
     },
     refetchInterval: 30000,
   });
 
-  // 2. Tutti i sondaggi aperti dalla tabella reale "polls"
-  const { data: activePolls } = useQuery({
+  // 2. Sondaggi: query elementare senza filtri complessi
+  const { data: activePolls = [] } = useQuery({
     queryKey: ['active_polls_home', activeLeagueId],
     queryFn: async () => {
       try {
-        let query = supabase
+        const { data, error } = await supabase
           .from('polls')
           .select('*')
           .eq('is_closed', false);
 
-        if (activeLeagueId) {
-          query = query.or(`league_id.eq.${activeLeagueId},league_id.is.null`);
-        }
+        if (error || !Array.isArray(data)) return [];
 
-        const { data, error } = await query.order('created_at', { ascending: false });
-        if (error || !data) return [];
+        if (activeLeagueId) {
+          return data.filter(
+            (p: any) => !p.league_id || p.league_id === activeLeagueId
+          );
+        }
         return data;
       } catch {
         return [];
@@ -66,19 +71,21 @@ function HomePage() {
     queryKey: ['upcoming_match_home', activeLeagueId],
     queryFn: async () => {
       if (!activeLeagueId) return null;
-      const { data } = await supabase
-        .from('matches')
-        .select('*')
-        .eq('league_id', activeLeagueId)
-        .eq('status', 'scheduled')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      return data || null;
+      try {
+        const { data } = await supabase
+          .from('matches')
+          .select('*')
+          .eq('league_id', activeLeagueId)
+          .eq('status', 'scheduled')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        return data || null;
+      } catch {
+        return null;
+      }
     },
   });
-
-  const todayStr = new Date().toISOString().split('T')[0];
 
   return (
     <div className="space-y-6 pb-24 max-w-lg mx-auto">
@@ -121,8 +128,8 @@ function HomePage() {
         </div>
       )}
 
-      {/* CARD UNICA COMPATTA: CONVOCAZIONI & DISPONIBILITÀ SETTIMANALE */}
-      {activePolls && activePolls.length > 0 && (
+      {/* CARD UNICA COMPATTA: CONVOCAZIONI & SONDAGGI */}
+      {Array.isArray(activePolls) && activePolls.length > 0 && (
         <div className="bg-[#131926] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
           <div className="flex justify-between items-center border-b border-slate-800/80 pb-2">
             <div>
@@ -139,81 +146,55 @@ function HomePage() {
           </div>
 
           <p className="text-xs text-slate-400">
-            Tocca un giorno disponibile per scegliere gli orari e confermare la tua presenza:
+            Tocca un giorno per selezionare gli orari e confermare la tua presenza:
           </p>
 
           <div className="space-y-2">
             {activePolls.map((poll: any) => {
-              const dateVal = poll.target_date;
-              const isPast = Boolean(dateVal && typeof dateVal === 'string' && dateVal < todayStr);
-              const isSelected = selectedPollId === poll.id;
-
-              // Parsing sicuro della data in italiano
-              let dayLabel = poll.title || 'Partita';
-              let formattedDate = '';
-              if (dateVal && typeof dateVal === 'string') {
-                const parts = dateVal.split('-');
-                if (parts.length === 3) {
-                  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-                  if (!isNaN(d.getTime())) {
-                    dayLabel = d.toLocaleDateString('it-IT', { weekday: 'long' });
-                    formattedDate = d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
-                  }
-                }
-              }
-
-              const slots: string[] = Array.isArray(poll.time_slots) && poll.time_slots.length > 0
+              const isSelected = selectedPollId === poll?.id;
+              const slots: string[] = Array.isArray(poll?.time_slots) && poll.time_slots.length > 0
                 ? poll.time_slots
                 : ['19:30', '20:00', '20:30', '21:00', '21:30', '22:00'];
 
               return (
                 <div
-                  key={poll.id}
+                  key={poll?.id || Math.random()}
                   className={`border rounded-xl transition-all overflow-hidden ${
-                    isPast
-                      ? 'bg-slate-900/40 border-slate-800/50 opacity-40 pointer-events-none'
-                      : isSelected
+                    isSelected
                       ? 'bg-slate-800/90 border-amber-400 shadow-md'
                       : 'bg-[#182132] border-slate-700/60 hover:border-slate-600'
                   }`}
                 >
                   <button
                     type="button"
-                    disabled={isPast}
-                    onClick={() => setSelectedPollId(isSelected ? null : poll.id)}
+                    onClick={() => setSelectedPollId(isSelected ? null : poll?.id)}
                     className="w-full flex items-center justify-between p-3.5 text-left"
                   >
                     <div className="flex items-center gap-3">
-                      <span className={`w-2 h-2 rounded-full ${isPast ? 'bg-slate-600' : 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]'}`} />
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]" />
                       <div>
                         <div className="font-bebas text-lg tracking-wide text-white capitalize leading-tight">
-                          {dayLabel} {formattedDate && <span className="text-slate-400 font-sans text-xs font-normal">({formattedDate})</span>}
+                          {poll?.title || 'Partita di Calcetto'}
                         </div>
-                        <div className="text-[11px] text-slate-400 truncate">
-                          {poll.title && poll.title !== dayLabel ? poll.title : 'Seleziona fascia oraria'}
-                        </div>
+                        {poll?.target_date && (
+                          <div className="text-[11px] text-slate-400 font-sans">
+                            Data: <span className="text-emerald-400 font-mono font-semibold">{String(poll.target_date)}</span>
+                          </div>
+                        )}
                       </div>
                     </div>
 
-                    <div>
-                      {isPast ? (
-                        <span className="text-[10px] font-bold uppercase text-slate-500 border border-slate-700 px-2 py-0.5 rounded">
-                          Passato
-                        </span>
-                      ) : (
-                        <span className={`text-[10px] font-bold uppercase px-2.5 py-1 rounded-md transition ${
-                          isSelected
-                            ? 'bg-amber-400 text-slate-950 font-bold'
-                            : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                        }`}>
-                          {isSelected ? 'Chiudi ▲' : 'Prenotati ▼'}
-                        </span>
-                      )}
-                    </div>
+                    <span className={`text-[10px] font-bold uppercase px-2.5 py-1 rounded-md transition ${
+                      isSelected
+                        ? 'bg-amber-400 text-slate-950 font-bold'
+                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                    }`}>
+                      {isSelected ? 'Chiudi ▲' : 'Prenotati ▼'}
+                    </span>
                   </button>
 
-                  {/* Finestra a comparsa con orari e link diretto al sondaggio */}
-                  {isSelected && !isPast && (
+                  {/* Espansione orari */}
+                  {isSelected && (
                     <div className="px-3.5 pb-3.5 pt-2 border-t border-slate-700/60 space-y-3 bg-[#121824]">
                       <div>
                         <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1.5">
