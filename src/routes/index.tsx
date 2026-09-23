@@ -101,7 +101,7 @@ function HomePage() {
     return top;
   }, [pollVotes]);
 
-  // Creazione e bilanciamento partita
+  // Creazione e bilanciamento partita con played_at integrato
   const createMatchMutation = useMutation({
     mutationFn: async () => {
       if (!activePoll || confirmedVotes.length < 10) return;
@@ -155,8 +155,7 @@ function HomePage() {
     onError: (err: any) => alert(`Errore generazione partita: ${err.message}`),
   });
 
-  // Se l'Admin ha impostato auto_create_match su TRUE in fase di apertura sondaggio,
-  // la partita si genera automaticamente appena si toccano quota 10 confermati
+  // Esecuzione automatica solo se auto_create_match era attivo sul sondaggio
   useEffect(() => {
     if (
       activePoll &&
@@ -361,7 +360,7 @@ function HomePage() {
             </div>
           </div>
 
-          {/* PULSANTE CREAZIONE MANUALE */}
+          {/* PULSANTE CREAZIONE MANUALE (Solo se l'Admin aveva impostato auto_create_match su false) */}
           {isAdmin && !activePoll.auto_create_match && confirmedVotes.length >= 10 && (
             <div className="pt-2">
               <button
