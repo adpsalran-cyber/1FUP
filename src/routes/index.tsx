@@ -49,7 +49,7 @@ function HomePage() {
     },
   });
 
-  // 2. Voti espressi (con supporto ai Guest)
+  // 2. Voti registrati (inclusi Guest)
   const { data: pollVotes, refetch: refetchVotes } = useQuery({
     queryKey: ['home_poll_responses', activePoll?.id],
     enabled: Boolean(activePoll?.id),
@@ -64,7 +64,7 @@ function HomePage() {
     },
   });
 
-  // 3. Prossima partita programmata
+  // 3. Prossima partita programmata (evento creato)
   const { data: upcomingMatch, refetch: refetchMatch } = useQuery({
     queryKey: ['home_upcoming_match', activeLeagueId],
     queryFn: async () => {
@@ -101,7 +101,7 @@ function HomePage() {
     return top;
   }, [pollVotes]);
 
-  // Creazione evento e bilanciamento tramite engine.ts
+  // Creazione e bilanciamento partita
   const createMatchMutation = useMutation({
     mutationFn: async () => {
       if (!activePoll || confirmedVotes.length < 10) return;
@@ -149,17 +149,11 @@ function HomePage() {
       refetchMatch();
       queryClient.invalidateQueries();
     },
-    onError: (err: any) => alert(`Errore creazione partita: ${err.message}`),
+    onError: (err: any) => alert(`Errore generazione partita: ${err.message}`),
   });
 
-  // Switch manuale/automatico nel sondaggio attivo
-  const toggleAutoCreate = async (enabled: boolean) => {
-    if (!activePoll?.id) return;
-    await supabase.from('polls').update({ auto_create_match: enabled }).eq('id', activePoll.id);
-    refetchPoll();
-  };
-
-  // Esecuzione automatica se attiva la spunta e si toccano 10 confermati
+  // Se l'Admin ha impostato auto_create_match su TRUE in fase di apertura sondaggio,
+  // la partita si genera automaticamente appena si toccano quota 10 confermati
   useEffect(() => {
     if (
       activePoll &&
@@ -172,7 +166,7 @@ function HomePage() {
     }
   }, [activePoll, confirmedVotes.length]);
 
-  // Sposta o scambia un giocatore tra le squadre
+  // Modifica formazioni: sposta o scambia giocatori tra Squadra A e Squadra B
   const movePlayerBetweenTeams = async (fromTeam: 'A' | 'B', index: number) => {
     if (!upcomingMatch) return;
     const currentA = [...(upcomingMatch.team_a_players || [])];
@@ -210,7 +204,7 @@ function HomePage() {
 
   return (
     <div className="space-y-6">
-      {/* 1. CARD EVENTO CREATO (PARTITA PROGRAMMATA) */}
+      {/* 1. CARD EVENTO CREATO (PARTITA CONFERMATA) */}
       {upcomingMatch && (
         <div className="bg-[#121721] border border-amber-400/40 rounded-2xl p-5 shadow-2xl space-y-4">
           <div className="flex justify-between items-start border-b border-slate-800 pb-3">
@@ -235,7 +229,7 @@ function HomePage() {
             <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-3">
               <div className="flex justify-between items-center border-b border-slate-800 pb-1 mb-2">
                 <h3 className="font-bebas text-lg text-slate-200">
-                  {upcomingMatch.team_a_name || 'Squadra A'}
+                  {upcomingMatch.team_a_name || 'Squadra Bianca'}
                 </h3>
                 <span className="text-[11px] font-mono text-lime-400 font-bold">OVR {avgTeamA}</span>
               </div>
@@ -266,7 +260,7 @@ function HomePage() {
             <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-3">
               <div className="flex justify-between items-center border-b border-slate-800 pb-1 mb-2">
                 <h3 className="font-bebas text-lg text-slate-200">
-                  {upcomingMatch.team_b_name || 'Squadra B'}
+                  {upcomingMatch.team_b_name || 'Squadra Nera'}
                 </h3>
                 <span className="text-[11px] font-mono text-lime-400 font-bold">OVR {avgTeamB}</span>
               </div>
@@ -295,7 +289,7 @@ function HomePage() {
             </div>
           </div>
 
-          {/* Azioni Admin Formazione */}
+          {/* Azioni Admin Modifica Formazione */}
           {isAdmin && (
             <div className="flex justify-end pt-2 border-t border-slate-800">
               <button
@@ -335,6 +329,7 @@ function HomePage() {
             </div>
           </div>
 
+          {/* Barra di avanzamento presenze */}
           <div className="w-full bg-slate-900 rounded-full h-2.5 overflow-hidden border border-slate-800">
             <div
               className="bg-lime-400 h-2.5 transition-all duration-500 rounded-full"
@@ -342,6 +337,7 @@ function HomePage() {
             />
           </div>
 
+          {/* Lista dei convocati registrati */}
           <div className="space-y-1">
             <span className="text-[11px] font-bold uppercase text-slate-400 block mb-1">
               Lista Presenze ({confirmedVotes.length}):
@@ -362,36 +358,17 @@ function HomePage() {
             </div>
           </div>
 
-          {/* CONTROLLI ADMIN */}
-          {isAdmin && (
-            <div className="bg-[#0b0e14] border border-slate-800 p-3 rounded-xl space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-bold text-slate-200 block">
-                    Crea partita automatica a 10
-                  </span>
-                  <span className="text-[10px] text-slate-400">
-                    Genera e bilancia subito l'evento appena si tocca quota 10
-                  </span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={Boolean(activePoll.auto_create_match)}
-                  onChange={(e) => toggleAutoCreate(e.target.checked)}
-                  className="w-4 h-4 accent-amber-400 cursor-pointer"
-                />
-              </div>
-
-              {confirmedVotes.length >= 10 && (
-                <button
-                  type="button"
-                  disabled={createMatchMutation.isPending}
-                  onClick={() => createMatchMutation.mutate()}
-                  className="w-full py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bebas text-lg rounded-xl font-bold shadow transition tracking-wider"
-                >
-                  {createMatchMutation.isPending ? 'BILANCIAMENTO IN CORSO...' : 'CONFERMA CONVOCAZIONI E GENERA SQUADRE'}
-                </button>
-              )}
+          {/* PULSANTE CREAZIONE MANUALE (Mostrato solo se l'auto-creazione era disattivata nell'admin) */}
+          {isAdmin && !activePoll.auto_create_match && confirmedVotes.length >= 10 && (
+            <div className="pt-2">
+              <button
+                type="button"
+                disabled={createMatchMutation.isPending}
+                onClick={() => createMatchMutation.mutate()}
+                className="w-full py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bebas text-lg rounded-xl font-bold shadow transition tracking-wider"
+              >
+                {createMatchMutation.isPending ? 'BILANCIAMENTO IN CORSO...' : 'CONFERMA CONVOCAZIONI E GENERA SQUADRE'}
+              </button>
             </div>
           )}
 
