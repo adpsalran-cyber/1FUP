@@ -55,7 +55,6 @@ function StandingsPage() {
         return {
           id: p.id,
           name: p.name,
-          role: p.role || 'ATT',
           pg,
           v,
           p: p_draw,
@@ -123,19 +122,16 @@ function StandingsPage() {
 
                   return (
                     <tr key={player.id} className="hover:bg-[#1a2233]/40 transition">
-                      {/* Posizione (Numero semplice bianco) */}
-                      <td className="py-3 px-3 text-center font-bebas text-base text-white">
+                      {/* Posizione */}
+                      <td className="py-3 px-3 text-center font-bebas text-lg text-white">
                         {rank}
                       </td>
 
-                      {/* Nome Giocatore e Ruolo (Senza medaglie o badge) */}
+                      {/* Nome Giocatore Grande (Senza ruolo o altro) */}
                       <td className="py-3 px-3 font-sans">
-                        <div className="font-bold text-white truncate max-w-[130px] sm:max-w-[160px]">
+                        <span className="font-bold text-base text-white truncate block max-w-[140px] sm:max-w-[180px]">
                           {player.name}
-                        </div>
-                        <div className="text-[10px] text-white/70 font-mono uppercase">
-                          {player.role}
-                        </div>
+                        </span>
                       </td>
 
                       {/* Partite Giocate */}
@@ -164,7 +160,7 @@ function StandingsPage() {
                       </td>
 
                       {/* Punti */}
-                      <td className="py-3 px-3 text-center font-bebas text-lg text-white font-bold">
+                      <td className="py-3 px-3 text-center font-bebas text-xl text-white font-bold">
                         {player.punti}
                       </td>
                     </tr>
