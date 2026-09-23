@@ -133,7 +133,7 @@ function MatchesPage() {
     ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
     : null;
 
-  // 1. Recupera l'utente corrente da Supabase Auth
+  // 1. Utente da sessione Supabase
   const { data: currentUser } = useQuery({
     queryKey: ['current_user'],
     queryFn: async () => {
@@ -142,18 +142,16 @@ function MatchesPage() {
     },
   });
 
-  // Supporto completo login username/password e ruolo admin verificato
+  // Supporto confermato: alci_user_role: admin
   const isAdmin = typeof window !== 'undefined' && Boolean(
     localStorage.getItem('alci_user_role') === 'admin' ||
     localStorage.getItem('user_role') === 'admin' ||
     localStorage.getItem('role') === 'admin' ||
     localStorage.getItem('is_admin') === 'true' ||
-    localStorage.getItem('alci_username') ||
-    localStorage.getItem('username') ||
     currentUser?.id
   );
 
-  // 2. Recupera partite della lega
+  // 2. Partite della lega
   const { data: matches, isLoading } = useQuery({
     queryKey: ['matches_list', activeLeagueId],
     queryFn: async () => {
@@ -167,7 +165,7 @@ function MatchesPage() {
     },
   });
 
-  // 3. Recupera voti già dati dall'utente per la partita selezionata
+  // 3. Voti utente per la partita selezionata
   const { data: existingVotes, refetch: refetchVotes } = useQuery({
     queryKey: ['match_votes', selectedMatch?.id, currentUser?.id],
     enabled: !!selectedMatch?.id && !!currentUser?.id,
@@ -199,7 +197,7 @@ function MatchesPage() {
     },
   });
 
-  // 4. Calcolo medie voti e conteggio MVP per la partita selezionata
+  // 4. Medie voti e MVP
   const { data: summaryVotes } = useQuery({
     queryKey: ['summary_votes', selectedMatch?.id],
     enabled: !!selectedMatch?.id,
@@ -239,7 +237,7 @@ function MatchesPage() {
   const scheduledMatches = (matches || []).filter((m: any) => m.status !== 'completed');
   const completedMatches = (matches || []).filter((m: any) => m.status === 'completed');
 
-  // Inserimento Risultato e Aggiornamento Classifica
+  // Salvataggio Risultato
   const handleSaveResult = async (match: any) => {
     if (scoreTeam1 < 0 || scoreTeam2 < 0) {
       alert('I punteggi non possono essere negativi.');
@@ -249,10 +247,8 @@ function MatchesPage() {
     setSavingScore(true);
     try {
       const now = new Date();
-      // Scadenza votazione tra 2 ore esatte
       const deadline = new Date(now.getTime() + 2 * 60 * 60 * 1000).toISOString();
 
-      // 1. Aggiorna partita su Supabase
       const { error: matchError } = await supabase
         .from('matches')
         .update({
@@ -277,7 +273,7 @@ function MatchesPage() {
     }
   };
 
-  // Eliminazione partita da Admin con ricalcolo immediato
+  // Eliminazione partita e ricalcolo immediato della classifica
   const handleDeleteMatch = async (matchId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
 
@@ -314,7 +310,6 @@ function MatchesPage() {
     setSubmittingVotes(true);
 
     try {
-      // Salva stelle
       for (const [playerId, stars] of Object.entries(userRatings)) {
         await supabase.from('match_ratings').upsert(
           {
@@ -327,7 +322,6 @@ function MatchesPage() {
         );
       }
 
-      // Salva MVP
       if (selectedMvp) {
         await supabase.from('match_mvp_votes').upsert(
           {
@@ -338,7 +332,6 @@ function MatchesPage() {
           { onConflict: 'match_id,voter_user_id' }
         );
 
-        // Verifica se nominare MVP ufficiale della partita
         const { data: mvpVotes } = await supabase
           .from('match_mvp_votes')
           .select('voted_player_id')
@@ -377,7 +370,6 @@ function MatchesPage() {
     }
   };
 
-  // Controlla se le votazioni sono ancora aperte (entro 2 ore)
   const isVotingOpen = (match: any) => {
     if (!match?.voting_deadline) return false;
     return new Date(match.voting_deadline).getTime() > Date.now();
@@ -592,6 +584,7 @@ function MatchesPage() {
                         </span>
                       )}
 
+                      {/* Tasto elimina: mostrato solo se sei l'admin */}
                       {isAdmin && (
                         <button
                           type="button"
