@@ -11,15 +11,36 @@ export const Route = createRoute({
 });
 
 function StandingsPage() {
-  const activeLeagueId = typeof window !== 'undefined'
+  const localLeagueId = typeof window !== 'undefined'
     ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
     : null;
 
-  // 1. Recupera la stagione attiva
+  // 1. Recupera l'unica lega attiva per garantire che punti sempre a quella corretta
+  const { data: currentLeague } = useQuery({
+    queryKey: ['active_league_single'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('leagues')
+        .select('*')
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (data?.id) {
+        localStorage.setItem('alci_league_id', data.id);
+        localStorage.setItem('active_league_id', data.id);
+      }
+      return data || null;
+    },
+  });
+
+  const activeLeagueId = currentLeague?.id || localLeagueId;
+
+  // 2. Recupera la stagione attiva
   const { data: season } = useQuery({
     queryKey: ['active_season', activeLeagueId],
+    enabled: !!activeLeagueId,
     queryFn: async () => {
-      if (!activeLeagueId) return null;
       const { data } = await supabase
         .from('seasons')
         .select('*')
@@ -31,104 +52,116 @@ function StandingsPage() {
     },
   });
 
-  // 2. Recupera tutti i giocatori della lega e calcola dalle partite giocate
+  // 3. Recupera giocatori e calcola classifica dinamica dalle partite giocate/simulate
   const { data: standings, isLoading, refetch } = useQuery({
     queryKey: ['standings_table', activeLeagueId],
     queryFn: async () => {
-      if (!activeLeagueId) return [];
+      // A. Recupera giocatori della rosa
+      let playersQuery = supabase.from('players').select('*');
+      if (activeLeagueId) {
+        playersQuery = playersQuery.eq('league_id', activeLeagueId);
+      }
+      const { data: players, error: pErr } = await playersQuery;
+      if (pErr || !players || players.length === 0) return [];
 
-      // A. Tutti i giocatori della rosa
-      const { data: players, error: pErr } = await supabase
-        .from('players')
-        .select('*')
-        .eq('league_id', activeLeagueId);
-
-      if (pErr || !players) return [];
-
-      // B. Tutte le partite della lega (inclusi record orfani o senza league_id esplicito)
-      const { data: matches } = await supabase
+      // B. Recupera partite senza filtri PostgREST a rischio errore 400
+      const { data: allMatches, error: mErr } = await supabase
         .from('matches')
-        .select('*')
-        .or(`league_id.eq.${activeLeagueId},league_id.is.null`);
+        .select('*');
+
+      if (mErr || !allMatches) return [];
+
+      // Filtra le partite della lega corrente o senza lega esplicita
+      const matches = allMatches.filter((m: any) => {
+        if (!activeLeagueId) return true;
+        return !m.league_id || String(m.league_id) === String(activeLeagueId);
+      });
 
       // Inizializza mappa statistiche a 0 per tutti
       const stats: Record<string, { pg: number; v: number; p: number; s: number; mvp: number }> = {};
       players.forEach((p: any) => {
-        stats[p.id] = { pg: 0, v: 0, p: 0, s: 0, mvp: Number(p.mvp_count || 0) };
+        stats[String(p.id)] = {
+          pg: 0,
+          v: 0,
+          p: 0,
+          s: 0,
+          mvp: Number(p.mvp_count || 0),
+        };
       });
 
-      // Funzione helper flessibile per estrarre l'ID di un giocatore sia se è un oggetto sia se è una stringa UUID
+      // Funzione helper per estrarre l'ID di un giocatore
       const extractId = (item: any): string | null => {
         if (!item) return null;
-        if (typeof item === 'string') return item;
-        if (typeof item === 'object') return item.id || item.player_id || null;
+        if (typeof item === 'string' || typeof item === 'number') return String(item);
+        if (typeof item === 'object') {
+          const raw = item.id || item.player_id || item._id;
+          return raw ? String(raw) : null;
+        }
         return null;
       };
 
-      // C. Calcola i risultati da qualsiasi partita conclusa
-      if (matches && matches.length > 0) {
-        matches.forEach((m: any) => {
-          // Supporta sia score_team1/score_team2 che score_team_a/score_team_b
-          const rawScore1 = m.score_team1 ?? m.score_team_a;
-          const rawScore2 = m.score_team2 ?? m.score_team_b;
+      // C. Calcola i risultati da qualsiasi partita conclusa o simulata
+      matches.forEach((m: any) => {
+        const rawScore1 = m.score_team1 ?? m.score_team_a;
+        const rawScore2 = m.score_team2 ?? m.score_team_b;
 
-          const isCompleted =
-            m.status === 'completed' ||
-            m.status === 'finished' ||
-            (rawScore1 !== null && rawScore2 !== null && (rawScore1 > 0 || rawScore2 > 0 || m.status !== 'scheduled'));
+        const hasScore = rawScore1 !== null && rawScore1 !== undefined && rawScore2 !== null && rawScore2 !== undefined;
+        const isCompleted =
+          m.status === 'completed' ||
+          m.status === 'finished' ||
+          (hasScore && (Number(rawScore1) > 0 || Number(rawScore2) > 0 || m.status !== 'scheduled'));
 
-          if (!isCompleted) return;
+        if (!isCompleted) return;
 
-          const s1 = Number(rawScore1 ?? 0);
-          const s2 = Number(rawScore2 ?? 0);
-          const isDraw = s1 === s2;
-          const t1Won = s1 > s2;
-          const t2Won = s2 > s1;
+        const s1 = Number(rawScore1 ?? 0);
+        const s2 = Number(rawScore2 ?? 0);
+        const isDraw = s1 === s2;
+        const t1Won = s1 > s2;
+        const t2Won = s2 > s1;
 
-          // Gestione Squadra 1 (supporta team1_players, team_a, team1)
-          let t1List = m.team1_players ?? m.team_a ?? m.team1 ?? [];
-          if (typeof t1List === 'string') {
-            try { t1List = JSON.parse(t1List); } catch (e) { t1List = []; }
-          }
-          if (Array.isArray(t1List)) {
-            t1List.forEach((rawP: any) => {
-              const pId = extractId(rawP);
-              if (pId && stats[pId]) {
-                stats[pId].pg += 1;
-                if (isDraw) stats[pId].p += 1;
-                else if (t1Won) stats[pId].v += 1;
-                else stats[pId].s += 1;
-              }
-            });
-          }
+        // Gestione Squadra 1 (team1_players, team_a, team1)
+        let t1List = m.team1_players ?? m.team_a ?? m.team1 ?? [];
+        if (typeof t1List === 'string') {
+          try { t1List = JSON.parse(t1List); } catch (e) { t1List = []; }
+        }
+        if (Array.isArray(t1List)) {
+          t1List.forEach((rawP: any) => {
+            const pId = extractId(rawP);
+            if (pId && stats[pId]) {
+              stats[pId].pg += 1;
+              if (isDraw) stats[pId].p += 1;
+              else if (t1Won) stats[pId].v += 1;
+              else stats[pId].s += 1;
+            }
+          });
+        }
 
-          // Gestione Squadra 2 (supporta team2_players, team_b, team2)
-          let t2List = m.team2_players ?? m.team_b ?? m.team2 ?? [];
-          if (typeof t2List === 'string') {
-            try { t2List = JSON.parse(t2List); } catch (e) { t2List = []; }
-          }
-          if (Array.isArray(t2List)) {
-            t2List.forEach((rawP: any) => {
-              const pId = extractId(rawP);
-              if (pId && stats[pId]) {
-                stats[pId].pg += 1;
-                if (isDraw) stats[pId].p += 1;
-                else if (t2Won) stats[pId].v += 1;
-                else stats[pId].s += 1;
-              }
-            });
-          }
+        // Gestione Squadra 2 (team2_players, team_b, team2)
+        let t2List = m.team2_players ?? m.team_b ?? m.team2 ?? [];
+        if (typeof t2List === 'string') {
+          try { t2List = JSON.parse(t2List); } catch (e) { t2List = []; }
+        }
+        if (Array.isArray(t2List)) {
+          t2List.forEach((rawP: any) => {
+            const pId = extractId(rawP);
+            if (pId && stats[pId]) {
+              stats[pId].pg += 1;
+              if (isDraw) stats[pId].p += 1;
+              else if (t2Won) stats[pId].v += 1;
+              else stats[pId].s += 1;
+            }
+          });
+        }
 
-          // MVP (supporta mvp_player_id e mvp_id)
-          const mvpId = m.mvp_player_id || m.mvp_id;
-          if (mvpId && stats[mvpId]) {
-            stats[mvpId].mvp += 1;
-          }
-        });
-      }
+        // MVP partita
+        const mvpId = extractId(m.mvp_player_id || m.mvp_id);
+        if (mvpId && stats[mvpId]) {
+          stats[mvpId].mvp += 1;
+        }
+      });
 
       const rows = players.map((p: any) => {
-        const s = stats[p.id] || { pg: 0, v: 0, p: 0, s: 0, mvp: 0 };
+        const s = stats[String(p.id)] || { pg: 0, v: 0, p: 0, s: 0, mvp: 0 };
         const punti = (s.v * 3) + (s.p * 1);
 
         return {
@@ -161,7 +194,7 @@ function StandingsPage() {
       <div className="flex justify-between items-end border-b border-slate-800 pb-3">
         <div>
           <span className="text-[10px] font-bold text-white uppercase tracking-wider block">
-            {season?.name || 'STAGIONE GENERALE'}
+            {season?.name || currentLeague?.name || 'ALCI 2026'}
           </span>
           <h1 className="font-bebas text-4xl text-white tracking-wider">CLASSIFICA</h1>
         </div>
