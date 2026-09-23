@@ -1,43 +1,46 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { createRoute } from '@tanstack/react-router';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import React, { useState } from 'react';
+import { createRoute, Link } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
 import { Route as rootRoute } from './__root';
 import { supabase } from '../lib/actions';
 
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/polls',
-  component: PollsPage,
+  path: '/',
+  component: HomePage,
 });
 
-function PollsPage() {
-  const queryClient = useQueryClient();
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
+function HomePage() {
+  const [selectedPollId, setSelectedPollId] = useState<string | null>(null);
 
-  const [activeLeagueId, setActiveLeagueId] = useState<string | null>(
-    typeof window !== 'undefined'
-      ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
-      : null
-  );
+  const activeLeagueId = typeof window !== 'undefined'
+    ? localStorage.getItem('alci_league_id') || localStorage.getItem('active_league_id')
+    : null;
 
-  const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
-  const [targetPlayerId, setTargetPlayerId] = useState<string>('');
+  // 1. Partita completata con votazioni MVP ancora aperte (prioritaria in cima)
+  const { data: activeVotingMatch } = useQuery({
+    queryKey: ['active_voting_match', activeLeagueId],
+    queryFn: async () => {
+      if (!activeLeagueId) return null;
+      const now = new Date().toISOString();
+      const { data } = await supabase
+        .from('matches')
+        .select('*')
+        .eq('league_id', activeLeagueId)
+        .eq('status', 'completed')
+        .gt('voting_deadline', now)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-  // 1. Recupera utente autenticato e ruolo admin
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        setCurrentUserId(user.id);
-        const storedRole = localStorage.getItem('alci_user_role');
-        setIsAdmin(storedRole === 'admin');
-      }
-    });
-  }, []);
+      return data || null;
+    },
+    refetchInterval: 30000,
+  });
 
-  // 2. Recupera il sondaggio attivo
-  const { data: poll, isLoading: pollLoading, refetch: refetchPoll } = useQuery({
-    queryKey: ['active_poll', activeLeagueId],
+  // 2. Tutti i sondaggi aperti (tabella "polls", is_closed: false)
+  const { data: activePolls } = useQuery({
+    queryKey: ['active_polls_home', activeLeagueId],
     queryFn: async () => {
       let query = supabase
         .from('polls')
@@ -49,535 +52,218 @@ function PollsPage() {
       }
 
       const { data, error } = await query
+        .order('target_date', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: false });
+
+      if (error) return [];
+      return data || [];
+    },
+  });
+
+  // 3. Prossima partita in programma
+  const { data: upcomingMatch } = useQuery({
+    queryKey: ['upcoming_match_home', activeLeagueId],
+    queryFn: async () => {
+      if (!activeLeagueId) return null;
+      const { data } = await supabase
+        .from('matches')
+        .select('*')
+        .eq('league_id', activeLeagueId)
+        .eq('status', 'scheduled')
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
-
-      if (error) return null;
-      return data;
+      return data || null;
     },
   });
 
-  // 3. Recupera tutti i giocatori registrati nella lega
-  const { data: leaguePlayers } = useQuery({
-    queryKey: ['poll_players', activeLeagueId],
-    queryFn: async () => {
-      if (!activeLeagueId) return [];
-      const { data, error } = await supabase
-        .from('players')
-        .select('id, name, role, user_id, is_dummy')
-        .eq('league_id', activeLeagueId)
-        .order('name');
-      if (error) return [];
-      return data || [];
-    },
-  });
-
-  // 4. Trova in automatico il profilo del giocatore collegato all'utente loggato
-  const myPlayer = useMemo(() => {
-    if (!leaguePlayers || !currentUserId) return null;
-    return leaguePlayers.find((p: any) => p.user_id === currentUserId) || null;
-  }, [leaguePlayers, currentUserId]);
-
-  // Pre-seleziona subito il proprio giocatore all'apertura
-  useEffect(() => {
-    if (!targetPlayerId && myPlayer) {
-      setTargetPlayerId(myPlayer.id);
-    }
-  }, [myPlayer, targetPlayerId]);
-
-  // 5. Recupera tutti i voti (giocatori + guest)
-  const { data: votes, refetch: refetchVotes } = useQuery({
-    queryKey: ['poll_votes', poll?.id],
-    enabled: Boolean(poll?.id),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('poll_votes')
-        .select('*, players(id, name, role, is_dummy)')
-        .eq('poll_id', poll!.id)
-        .order('created_at', { ascending: true });
-
-      if (error) return [];
-      return data || [];
-    },
-  });
-
-  // Carica le preferenze già registrate per il giocatore selezionato
-  useEffect(() => {
-    if (targetPlayerId && votes) {
-      const existing = votes.find((v: any) => v.player_id === targetPlayerId);
-      if (existing?.selected_slots) {
-        setSelectedSlots(existing.selected_slots);
-      } else {
-        setSelectedSlots([]);
-      }
-    }
-  }, [targetPlayerId, votes]);
-
-  // Fasce orarie disponibili
-  const availableSlots: string[] =
-    poll?.time_slots && poll.time_slots.length > 0
-      ? poll.time_slots
-      : ['19:30', '20:00', '20:30', '21:00', '21:30', '22:00'];
-
-  const confirmedVotes = votes?.filter((v: any) => v.is_confirmed) || [];
-  const waitingVotes = votes?.filter((v: any) => !v.is_confirmed) || [];
-  const hasGuestVotes = votes?.some((v: any) => v.guest_name) || false;
-
-  // Calcolo dell'orario preferito per i guest
-  const bestSlot = useMemo(() => {
-    if (!votes || votes.length === 0) return availableSlots[0] || '20:30';
-    const counts: Record<string, number> = {};
-    votes.forEach((v: any) => {
-      v.selected_slots?.forEach((s: string) => {
-        counts[s] = (counts[s] || 0) + 1;
-      });
-    });
-    let top = availableSlots[0] || '20:30';
-    let max = 0;
-    Object.entries(counts).forEach(([slot, c]) => {
-      if (c > max) {
-        max = c;
-        top = slot;
-      }
-    });
-    return top;
-  }, [votes, availableSlots]);
-
-  // Mutazione: Voto per il giocatore
-  const voteMutation = useMutation({
-    mutationFn: async () => {
-      if (!poll?.id || !targetPlayerId) {
-        throw new Error('Seleziona il calciatore per cui votare.');
-      }
-      if (selectedSlots.length === 0) {
-        throw new Error('Seleziona almeno un orario disponibile.');
-      }
-
-      const currentVotes = votes || [];
-      const isAlreadyConfirmed = currentVotes.some(
-        (v: any) => v.player_id === targetPlayerId && v.is_confirmed
-      );
-      const isConfirmed =
-        isAlreadyConfirmed || currentVotes.filter((v: any) => v.is_confirmed).length < 10;
-      const queuePosition = isConfirmed
-        ? null
-        : currentVotes.filter((v: any) => !v.is_confirmed).length + 1;
-
-      const existingVote = votes?.find((v: any) => v.player_id === targetPlayerId);
-
-      let error;
-      if (existingVote) {
-        const res = await supabase
-          .from('poll_votes')
-          .update({
-            selected_slots: selectedSlots,
-            is_confirmed: isConfirmed,
-            queue_position: queuePosition,
-          })
-          .eq('id', existingVote.id);
-        error = res.error;
-      } else {
-        const res = await supabase
-          .from('poll_votes')
-          .insert({
-            poll_id: poll.id,
-            player_id: targetPlayerId,
-            guest_name: null,
-            selected_slots: selectedSlots,
-            is_confirmed: isConfirmed,
-            queue_position: queuePosition,
-            created_at: new Date().toISOString(),
-          });
-        error = res.error;
-      }
-
-      if (error) throw new Error(error.message);
-    },
-    onSuccess: () => {
-      alert('Presenza e orari registrati!');
-      refetchVotes();
-      queryClient.invalidateQueries({ queryKey: ['home_poll_responses'] });
-      queryClient.invalidateQueries({ queryKey: ['home_latest_poll'] });
-    },
-    onError: (err: any) => alert(`Errore: ${err.message}`),
-  });
-
-  // Mutazione: Ritiro presenza giocatore
-  const cancelMutation = useMutation({
-    mutationFn: async () => {
-      if (!poll?.id || !targetPlayerId) return;
-      const { error } = await supabase
-        .from('poll_votes')
-        .delete()
-        .eq('poll_id', poll.id)
-        .eq('player_id', targetPlayerId);
-
-      if (error) throw new Error(error.message);
-    },
-    onSuccess: () => {
-      alert('Presenza ritirata.');
-      setSelectedSlots([]);
-      refetchVotes();
-      queryClient.invalidateQueries({ queryKey: ['home_poll_responses'] });
-      queryClient.invalidateQueries({ queryKey: ['home_latest_poll'] });
-    },
-    onError: (err: any) => alert(`Errore: ${err.message}`),
-  });
-
-  // Mutazione: RIEMPI CON GUEST (fino a 10)
-  const fillWithGuestsMutation = useMutation({
-    mutationFn: async () => {
-      if (!poll?.id) return;
-      const currentConfirmed = confirmedVotes.length;
-      const needed = 10 - currentConfirmed;
-
-      if (needed <= 0) {
-        throw new Error('Ci sono già 10 o più confermati in squadra!');
-      }
-
-      const existingGuestsCount = votes?.filter((v: any) => v.guest_name)?.length || 0;
-      const guestRows = [];
-
-      for (let i = 1; i <= needed; i++) {
-        guestRows.push({
-          poll_id: poll.id,
-          player_id: null,
-          guest_name: `Guest ${existingGuestsCount + i}`,
-          selected_slots: [bestSlot],
-          is_confirmed: true,
-          queue_position: null,
-          created_at: new Date().toISOString(),
-        });
-      }
-
-      const { error } = await supabase.from('poll_votes').insert(guestRows);
-      if (error) throw new Error(error.message);
-    },
-    onSuccess: () => {
-      alert('Squadra completata con i Guest mancanti!');
-      refetchVotes();
-      queryClient.invalidateQueries({ queryKey: ['home_poll_responses'] });
-      queryClient.invalidateQueries({ queryKey: ['home_latest_poll'] });
-    },
-    onError: (err: any) => alert(`Errore riempimento guest: ${err.message}`),
-  });
-
-  // Mutazione: Rimuovi tutti i Guest
-  const clearGuestsMutation = useMutation({
-    mutationFn: async () => {
-      if (!poll?.id) return;
-      const { error } = await supabase
-        .from('poll_votes')
-        .delete()
-        .eq('poll_id', poll.id)
-        .not('guest_name', 'is', null);
-
-      if (error) throw new Error(error.message);
-    },
-    onSuccess: () => {
-      alert('Tutti i Guest sono stati rimossi dal sondaggio.');
-      refetchVotes();
-      queryClient.invalidateQueries({ queryKey: ['home_poll_responses'] });
-      queryClient.invalidateQueries({ queryKey: ['home_latest_poll'] });
-    },
-    onError: (err: any) => alert(`Errore: ${err.message}`),
-  });
-
-  // Rimuovi singolo Guest
-  const deleteSingleGuest = async (voteId: string) => {
-    const { error } = await supabase.from('poll_votes').delete().eq('id', voteId);
-    if (!error) refetchVotes();
-  };
-
-  const toggleSlot = (slot: string) => {
-    setSelectedSlots((prev) =>
-      prev.includes(slot) ? prev.filter((s) => s !== slot) : [...prev, slot]
-    );
-  };
-
-  if (pollLoading) {
-    return (
-      <div className="p-8 text-center text-slate-400 font-bebas text-xl animate-pulse">
-        CARICAMENTO SONDAGGIO...
-      </div>
-    );
-  }
-
-  if (!poll) {
-    return (
-      <div className="p-4 max-w-lg mx-auto space-y-4">
-        <div className="border-b border-[#222c42] pb-3">
-          <h1 className="font-bebas text-3xl text-slate-100">SONDAGGI CONVOCAZIONI</h1>
-        </div>
-        <div className="bg-[#151b28] border border-[#222c42] rounded-xl p-8 text-center space-y-2">
-          <p className="font-bebas text-xl text-slate-300">NESSUN SONDAGGIO APERTO</p>
-          <p className="text-xs text-slate-400">
-            L'amministratore non ha ancora aperto le convocazioni per la prossima partita.
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const now = new Date();
+  const todayDateStr = now.toISOString().split('T')[0];
 
   return (
-    <div className="p-4 space-y-5 pb-24 max-w-lg mx-auto">
-      {/* Header */}
-      <div className="border-b border-[#222c42] pb-3 flex justify-between items-end">
-        <div>
-          <h1 className="font-bebas text-3xl text-slate-100">SONDAGGIO PARTITA</h1>
-          <p className="text-xs text-slate-400">
-            {poll.title || 'Partita di Calcetto'} • Data:{' '}
-            <strong className="text-lime-400">{poll.target_date}</strong>
-          </p>
-        </div>
-        <button
-          onClick={() => {
-            refetchPoll();
-            refetchVotes();
-          }}
-          className="text-xs text-slate-400 hover:text-white underline"
-        >
-          Aggiorna
-        </button>
+    <div className="space-y-6 pb-24 max-w-lg mx-auto">
+      {/* Banner Titolo */}
+      <div className="border-b border-slate-800 pb-3">
+        <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
+          CENTRO SPORTIVO
+        </span>
+        <h1 className="font-bebas text-4xl text-white tracking-wider">HUB PRINCIPALE</h1>
       </div>
 
-      {/* SEZIONE VOTAZIONE */}
-      <div className="bg-[#151b28] p-4 rounded-xl border border-[#222c42] space-y-4 shadow-xl">
-        {/* Selettore Profilo (Preimpostato sul proprio utente) */}
-        <div>
-          <div className="flex justify-between items-center mb-1">
-            <label className="text-xs uppercase text-slate-400 font-semibold">
-              Chi sta votando?
-            </label>
-            {targetPlayerId === myPlayer?.id && myPlayer && (
-              <span className="text-[10px] font-bold text-lime-400 bg-lime-400/10 px-2 py-0.5 rounded border border-lime-400/20">
-                IL TUO PROFILO
-              </span>
-            )}
-          </div>
-          <select
-            value={targetPlayerId}
-            onChange={(e) => setTargetPlayerId(e.target.value)}
-            className="w-full bg-[#0b0e14] border border-[#222c42] rounded-lg p-2.5 text-sm text-slate-100 focus:outline-none focus:border-lime-400 font-semibold"
-          >
-            <option value="">-- Seleziona Calciatore --</option>
-            {leaguePlayers?.map((p: any) => (
-              <option key={p.id} value={p.id}>
-                {p.name} {p.id === myPlayer?.id ? ' (Tu)' : ''} {p.is_dummy ? ' [Fittizio]' : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Selezione Orari */}
-        <div>
-          <div className="flex justify-between items-center mb-2">
-            <label className="text-xs uppercase text-slate-400 font-semibold">
-              Orari Disponibili (Scelta Multipla)
-            </label>
-            <span className="text-[10px] text-lime-400 font-mono">
-              {selectedSlots.length} selezionati
+      {/* WIDGET PRIORITARIO: VOTAZIONI MVP ATTIVE */}
+      {activeVotingMatch && (
+        <div className="bg-gradient-to-r from-amber-500/20 via-[#151c28] to-amber-500/10 border border-amber-400/60 rounded-2xl p-5 shadow-2xl space-y-3">
+          <div className="flex justify-between items-center">
+            <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5 animate-pulse">
+              <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
+              VOTAZIONI ATTIVE (2 ORE)
+            </span>
+            <span className="text-xs font-mono text-slate-300">
+              Scade alle: {new Date(activeVotingMatch.voting_deadline).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
             </span>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {availableSlots.map((slot) => {
-              const isSelected = selectedSlots.includes(slot);
-              return (
-                <button
-                  type="button"
-                  key={slot}
-                  onClick={() => toggleSlot(slot)}
-                  className={`py-2 px-1 rounded-lg font-bebas text-lg border transition ${
-                    isSelected
-                      ? 'bg-lime-400 text-slate-950 border-lime-400 font-bold shadow'
-                      : 'bg-[#0b0e14] text-slate-300 border-[#222c42] hover:border-slate-600'
-                  }`}
-                >
-                  {slot}
-                </button>
-              );
-            })}
-          </div>
-        </div>
 
-        {/* Pulsanti Azione */}
-        <div className="flex gap-2 pt-2 border-t border-[#222c42]">
-          <button
-            type="button"
-            disabled={!targetPlayerId || selectedSlots.length === 0 || voteMutation.isPending}
-            onClick={() => voteMutation.mutate()}
-            className="flex-1 py-3 bg-lime-400 disabled:opacity-40 text-slate-950 font-bebas text-xl rounded-xl transition font-bold shadow-md"
-          >
-            {voteMutation.isPending ? 'Salvataggio...' : 'CONFERMA PRESENZA'}
-          </button>
-          <button
-            type="button"
-            disabled={!targetPlayerId || cancelMutation.isPending}
-            onClick={() => cancelMutation.mutate()}
-            className="px-4 py-3 bg-rose-500/20 text-rose-400 border border-rose-500/30 disabled:opacity-40 font-bebas text-lg rounded-xl hover:bg-rose-500/30 transition"
-          >
-            RITIRA
-          </button>
-        </div>
-      </div>
-
-      {/* AZIONI SPECIALI GUEST */}
-      <div className="bg-[#111722] p-3 rounded-xl border border-[#222c42] flex flex-col sm:flex-row items-center justify-between gap-2">
-        <div>
-          <span className="font-bebas text-base text-slate-200 block">GESTIONE GUEST VOLANTI</span>
-          <span className="text-[11px] text-slate-400">
-            Segnaposto temporanei per arrivare a 10 senza toccare le statistiche.
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          {confirmedVotes.length < 10 && (
-            <button
-              type="button"
-              disabled={fillWithGuestsMutation.isPending}
-              onClick={() => fillWithGuestsMutation.mutate()}
-              className="flex-1 sm:flex-none px-3 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bebas text-sm rounded-lg font-bold shadow transition"
-            >
-              + RIEMPI A 10 CON GUEST ({10 - confirmedVotes.length})
-            </button>
-          )}
-
-          {hasGuestVotes && (
-            <button
-              type="button"
-              disabled={clearGuestsMutation.isPending}
-              onClick={() => clearGuestsMutation.mutate()}
-              className="px-3 py-2 bg-rose-950/60 border border-rose-800 text-rose-300 font-bebas text-sm rounded-lg hover:bg-rose-900 transition"
-            >
-              RIMUOVI GUEST
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* LISTA CONFERMATI (10 POSTI) */}
-      <div className="space-y-4">
-        <div>
-          <div className="flex justify-between items-center mb-2">
-            <h2 className="font-bebas text-xl text-lime-400 tracking-wide">
-              CONFERMATI IN SQUADRA ({confirmedVotes.length}/10)
-            </h2>
-            {confirmedVotes.length >= 10 && (
-              <span className="text-[10px] font-bold uppercase bg-amber-400/20 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded">
-                Rosa al Completo
-              </span>
-            )}
-          </div>
-
-          <div className="space-y-1.5">
-            {confirmedVotes.map((v: any, index: number) => {
-              const isGuest = Boolean(v.guest_name);
-              const isMe = v.player_id === myPlayer?.id;
-              const displayName = isGuest ? v.guest_name : v.players?.name || 'Giocatore';
-
-              return (
-                <div
-                  key={v.id}
-                  className={`flex justify-between items-center p-2.5 rounded-xl border ${
-                    isGuest
-                      ? 'bg-amber-400/5 border-amber-400/30'
-                      : isMe
-                      ? 'bg-lime-400/10 border-lime-400/50'
-                      : 'bg-[#151b28] border-[#222c42]'
-                  }`}
-                >
-                  <div className="flex items-center space-x-2">
-                    <span className="font-bebas text-lime-400 w-5 text-sm">{index + 1}.</span>
-                    <div>
-                      <span className="text-sm font-semibold text-slate-100 block leading-tight flex items-center gap-1.5">
-                        {displayName}
-                        {isMe && (
-                          <span className="text-[9px] bg-lime-400 text-slate-950 font-bold px-1 rounded">
-                            TU
-                          </span>
-                        )}
-                        {isGuest && (
-                          <span className="text-[9px] bg-amber-400/20 text-amber-300 border border-amber-400/40 font-bold px-1 rounded">
-                            GUEST
-                          </span>
-                        )}
-                        {v.players?.is_dummy && (
-                          <span className="text-[9px] bg-slate-800 text-slate-400 px-1 rounded">
-                            FITTIZIO
-                          </span>
-                        )}
-                      </span>
-                      <span className="text-[10px] text-slate-400 uppercase font-semibold">
-                        {isGuest ? 'Ospite Esterno' : v.players?.role || 'ATT'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <div className="flex gap-1 flex-wrap justify-end">
-                      {v.selected_slots?.map((s: string) => (
-                        <span
-                          key={s}
-                          className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-[#0b0e14] text-slate-300 border border-[#222c42]"
-                        >
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-
-                    {isGuest && (
-                      <button
-                        type="button"
-                        onClick={() => deleteSingleGuest(v.id)}
-                        className="text-rose-400 hover:text-rose-300 px-1.5 py-0.5 text-xs font-bold"
-                        title="Rimuovi questo guest"
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-
-            {confirmedVotes.length === 0 && (
-              <p className="text-xs text-slate-500 italic p-3 text-center bg-[#151b28]/50 rounded-xl border border-[#222c42]">
-                Ancora nessun giocatore confermato. Registrati o riempi con Guest per completare la rosa!
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* LISTA D'ATTESA */}
-        {waitingVotes.length > 0 && (
           <div>
-            <h2 className="font-bebas text-xl text-amber-400 tracking-wide mb-2">
-              LISTA D'ATTESA / RISERVE ({waitingVotes.length})
+            <h2 className="font-bebas text-2xl text-white tracking-wide">
+              PAGELLE & MVP: {activeVotingMatch.score_team1} - {activeVotingMatch.score_team2}
             </h2>
-            <div className="space-y-1.5">
-              {waitingVotes.map((v: any) => (
-                <div
-                  key={v.id}
-                  className="flex justify-between items-center p-2.5 rounded-xl bg-[#151b28]/60 border border-amber-500/20"
-                >
-                  <div className="flex items-center space-x-2">
-                    <span className="font-bebas text-amber-400 w-6 text-sm">
-                      +{v.queue_position}
-                    </span>
-                    <span className="text-sm text-slate-300">
-                      {v.guest_name || v.players?.name || 'Giocatore'}
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-amber-400/80 font-semibold bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/20">
-                    Riserva
-                  </span>
-                </div>
-              ))}
-            </div>
+            <p className="text-xs text-slate-300">
+              Inserisci i tuoi voti a stelle e vota il migliore in campo della partita appena conclusa.
+            </p>
           </div>
-        )}
-      </div>
+
+          <Link
+            to="/matches"
+            className="inline-block w-full text-center py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bebas text-base rounded-xl font-bold transition shadow"
+          >
+            VOTA ORA LE PAGELLE & MVP ➔
+          </Link>
+        </div>
+      )}
+
+      {/* CARD UNICA COMPATTA: CONVOCAZIONI & DISPONIBILITÀ SETTIMANALE */}
+      {activePolls && activePolls.length > 0 && (
+        <div className="bg-[#131926] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+          <div className="flex justify-between items-center border-b border-slate-800/80 pb-2">
+            <div>
+              <span className="text-[10px] font-bold text-lime-400 uppercase tracking-wider block">
+                CONVOCAZIONI & DISPONIBILITÀ
+              </span>
+              <h2 className="font-bebas text-2xl text-white tracking-wide">
+                CALENDARIO SETTIMANALE
+              </h2>
+            </div>
+            <span className="text-[11px] font-semibold bg-lime-400/10 text-lime-400 border border-lime-400/30 px-2 py-0.5 rounded-full">
+              {activePolls.length} {activePolls.length === 1 ? 'GIORNO' : 'GIORNI'}
+            </span>
+          </div>
+
+          <p className="text-xs text-slate-400">
+            Tocca un giorno disponibile per verificare gli orari e confermare la tua presenza:
+          </p>
+
+          <div className="space-y-2">
+            {activePolls.map((poll: any) => {
+              const dateStr = poll.target_date;
+              const isPast = Boolean(dateStr && dateStr < todayDateStr);
+              const isSelected = selectedPollId === poll.id;
+
+              // Calcolo del giorno della settimana in italiano
+              let dayName = poll.title || 'Partita di Calcetto';
+              let formattedDate = dateStr || '';
+
+              if (dateStr) {
+                const parts = dateStr.split('-');
+                if (parts.length === 3) {
+                  const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+                  dayName = d.toLocaleDateString('it-IT', { weekday: 'long' });
+                  formattedDate = d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
+                }
+              }
+
+              const slots: string[] = poll.time_slots && poll.time_slots.length > 0
+                ? poll.time_slots
+                : ['19:30', '20:00', '20:30', '21:00', '21:30', '22:00'];
+
+              return (
+                <div
+                  key={poll.id}
+                  className={`border rounded-xl transition-all overflow-hidden ${
+                    isPast
+                      ? 'bg-slate-900/40 border-slate-800/50 opacity-40 pointer-events-none'
+                      : isSelected
+                      ? 'bg-slate-800/90 border-lime-400 shadow-md'
+                      : 'bg-[#182132] border-slate-700/60 hover:border-slate-600'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    disabled={isPast}
+                    onClick={() => setSelectedPollId(isSelected ? null : poll.id)}
+                    className="w-full flex items-center justify-between p-3.5 text-left"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={`w-2 h-2 rounded-full ${isPast ? 'bg-slate-600' : 'bg-lime-400 shadow-[0_0_8px_rgba(163,230,53,0.6)]'}`} />
+                      <div>
+                        <div className="font-bebas text-lg tracking-wide text-white capitalize leading-tight">
+                          {dayName} {formattedDate && <span className="text-slate-400 font-sans text-xs font-normal">({formattedDate})</span>}
+                        </div>
+                        <div className="text-[11px] text-slate-400 truncate">
+                          {poll.title && poll.title !== dayName ? poll.title : 'Seleziona fascia oraria'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      {isPast ? (
+                        <span className="text-[10px] font-bold uppercase text-slate-500 border border-slate-700 px-2 py-0.5 rounded">
+                          Passato
+                        </span>
+                      ) : (
+                        <span className={`text-[10px] font-bold uppercase px-2.5 py-1 rounded-md transition ${
+                          isSelected
+                            ? 'bg-lime-400 text-slate-950 font-bold'
+                            : 'bg-lime-400/20 text-lime-300 border border-lime-400/40'
+                        }`}>
+                          {isSelected ? 'Chiudi ▲' : 'Prenotati ▼'}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+
+                  {/* Cassetto espandibile con orari e pulsante */}
+                  {isSelected && !isPast && (
+                    <div className="px-3.5 pb-3.5 pt-2 border-t border-slate-700/60 space-y-3 bg-[#121824]">
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
+                          Fasce Orarie Disponibili:
+                        </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {slots.map((s) => (
+                            <span
+                              key={s}
+                              className="px-2 py-0.5 rounded text-xs font-mono bg-[#0b0e14] text-lime-400 border border-slate-700"
+                            >
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <Link
+                        to="/polls"
+                        className="inline-block w-full text-center py-2 bg-gradient-to-r from-lime-400 to-lime-300 hover:brightness-105 text-slate-950 font-bebas text-base rounded-lg font-bold tracking-wider transition shadow"
+                      >
+                        VAI AL SONDAGGIO & CONFERMA ➔
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* WIDGET PROSSIMA PARTITA IN PROGRAMMA */}
+      {upcomingMatch && (
+        <div className="bg-[#131926] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+            IN PROGRAMMA
+          </span>
+          <div className="flex justify-between items-center py-2 text-center">
+            <span className="font-bold text-white text-sm">Squadra 1</span>
+            <span className="font-bebas text-2xl text-amber-400">VS</span>
+            <span className="font-bold text-white text-sm">Squadra 2</span>
+          </div>
+          <Link
+            to="/matches"
+            className="inline-block w-full text-center py-2 bg-[#0b0e14] hover:bg-slate-800 text-slate-200 font-bebas text-xs rounded-xl font-semibold transition border border-slate-800"
+          >
+            DETTAGLI FORMAZIONI ➔
+          </Link>
+        </div>
+      )}
     </div>
   );
 }
